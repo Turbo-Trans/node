@@ -7,6 +7,10 @@ var path = require("path");
 const bcrypt = require("bcrypt");
 const con = require("./components/db");
 const auth = require('./components/auth');
+const perm = require('./components/perm');
+
+
+var regularExpression = /^(?=.*[0-9])(?=.*[!@#$%^&*])[a-zA-Z0-9!@#$%^&*]{8,64}$/;
 
 
 app.use(cors({
@@ -52,7 +56,7 @@ app.post('/login', async (req, res) => {
     }
 
     const query = `
-      SELECT u.userID, u.username, u.password, ud.email, ud.tel, ud.cityID, ud.address, ud.job, ud.warehouseID
+      SELECT u.userID, u.username, u.password, u.permission, ud.email, ud.tel, ud.cityID, ud.address, ud.job, ud.warehouseID
       FROM user u
       LEFT JOIN userdata ud ON u.userID = ud.userID
       WHERE u.username = ?
@@ -73,7 +77,7 @@ app.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { userID: user.userID, username: user.username },
+      { userID: user.userID, username: user.username , permission: user.permission},
       process.env.JWT_SECRET || "secretkey",
       { expiresIn: "7d" }
     );
@@ -99,11 +103,63 @@ app.post('/login', async (req, res) => {
   }
 });
 
-app.get('/getUsers', auth, async(req,res) => {
+app.get('/getUsers', auth, perm(1,2), 
+  async(req,res) => 
+  {
   const query = `select * from userData`;
   const [results] = await con.promise().query(query);
   res.json(results);
-});
+  }
+);
+
+
+
+app.post('/addUser', auth, perm(1),
+  async(req,res) =>
+  {
+    let {
+      username,
+      password,
+      permission,
+      email,
+      tel,
+      cityID,
+      address,
+      job,
+      warehouseID
+    } = req.body;
+
+
+    if(!username || !password || !permission || !email || !tel || !cityID || !address || !job || !warehouseID)
+    return res.status(400).json({message: "Eksik alan girisi."});
+
+    if(username.length > 50)
+    {
+      return res.status(400).json({message: "Kullanici Adi 50 karakterden buyuk olamaz"});
+    }
+
+    if(!regularExpression.test(password))
+    {
+    return res.status(400).json({message: "En Az 8, En Fazla 64 Karakter. Bir Sayi ve Bir Ozel karakter icermeli"})}
+
+    try {
+
+      const hashedPassword = await bcrypt.hash("123456", 12);
+
+      query = "insert into user(username,password,permission) values (?,?,?)";
+      let [result] = await con.promise().query(query, [username,hashedPassword,permission]);
+      const userID = result.insertId;
+      query = "insert into userdata(userID,email,tel,cityID,address,job,warehouseID) values (?,?,?,?,?,?,?)";
+      result = await con.promise().query(query,[userID,email,tel,cityID,address,job,warehouseID]);
+      res.status(200).json({message: "Islem Basarili"});
+    }
+    catch (error) {
+      console.error("SQL Hatasi", error);
+      res.status(500).json({error: "SQL Hatasi"})
+    }
+  }
+
+);
 
 
 app.use((req, res) => {
