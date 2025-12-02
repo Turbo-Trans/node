@@ -155,11 +155,53 @@ app.post('/addUser', auth, perm(1),
     }
     catch (error) {
       console.error("SQL Hatasi", error);
-      res.status(500).json({error: "SQL Hatasi"})
+      return res.status(500).json({error: "SQL Hatasi"})
     }
   }
 
 );
+
+
+app.delete('/deleteUser', auth, perm(1), async(req, res) => {
+  const id = req.query.userID;
+  if(!id)
+  return res.status(400).json({message: "UserID giriniz => /deleteUser?userID=1"});
+
+  const [search] = await con.promise().query('select count(*) as cnt from user where userID=?',[id]);
+
+  if(search[0].cnt === 0)
+  return res.status(404).json({message: "Belirtilen UserID ile kayit bulunamadi."});
+
+  const query1 = `delete from userdata where userID = ?`;
+  const query2 = `delete from users where userID = ?`;
+  const connection = await con.promise().getConnection();
+
+  try {
+    await connection.beginTransaction();
+    const [res1] = await connection.promise().query(query1,[id]);
+    if(res1.affectedRows === 0)
+    {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({message: "userdata silinirken hata olustu, islem geri alindi."});
+    }
+
+    const [res2] = await connection.promise().query(query2,[id]);
+    if(res2.affectedRows === 0)
+    {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({message: "users silinirken hata olustu, islem geri alindi."});
+    }
+    await connection.commit();
+    connection.release();
+    return res.status(201).json({message: "Bilgiler basariyla silindi."});
+  }
+  catch(err) {
+    await connection.rollback();
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
 
 
 app.use((req, res) => {
