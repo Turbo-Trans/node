@@ -1,0 +1,370 @@
+{
+  "info": {
+    "title": "Logistics Management API",
+    "version": "1.0.0",
+    "description": "API endpoints for user management, warehouses, trucks, products."
+  },
+
+  "authentication": {
+    "type": "JWT",
+    "header": "Authorization: Bearer <token>"
+  },
+
+  "endpoints": [
+    {
+      "name": "Login",
+      "method": "POST",
+      "url": "/login",
+      "permission": "Public",
+      "body": {
+        "username": "string",
+        "password": "string"
+      },
+      "responses": {
+        "200": {
+          "message": "Giris Basarili.",
+          "token": "jwt-token",
+          "user": {
+            "userID": "number",
+            "username": "string",
+            "email": "string",
+            "tel": "string",
+            "cityID": "number",
+            "address": "string",
+            "job": "string",
+            "warehouseID": "number"
+          }
+        },
+        "400": {"message": "Eksik bilgi girisi"},
+        "401": {"message": "Kullanici bulunamadi / Yanlis sifre"},
+        "500": {"message": "Sunucu hatasi"}
+      }
+    },
+
+    {
+      "name": "Get All Users",
+      "method": "GET",
+      "url": "/getUsers",
+      "permission": [1, 2],
+      "headers": {
+        "Authorization": "Bearer <token>"
+      },
+      "responses": {
+        "200": [
+          {
+            "userID": "number",
+            "username": "string",
+            "email": "string",
+            "tel": "string",
+            "address": "string",
+            "job": "string",
+            "cityID": "number",
+            "warehouseID": "number"
+          }
+        ],
+        "404": {"message": "Sistemde hicbir kullanici bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Add User",
+      "method": "POST",
+      "url": "/addUser",
+      "permission": [1],
+      "body": {
+        "username": "string (required)",
+        "password": "string (required)",
+        "permission": "number (required)",
+        "email": "string",
+        "tel": "string",
+        "cityID": "number",
+        "address": "string",
+        "job": "string",
+        "warehouseID": "number"
+      },
+      "responses": {
+        "200": {"message": "Islem Basarili"},
+        "400": {"message": "Eksik alan girisi / Sifre format hatasi"},
+        "500": {"error": "SQL Hatasi"}
+      }
+    },
+
+    {
+      "name": "Delete User",
+      "method": "DELETE",
+      "url": "/deleteUser?userID=",
+      "permission": [1],
+      "query": {
+        "userID": "number"
+      },
+      "responses": {
+        "201": {"message": "Bilgiler basariyla silindi."},
+        "400": {"message": "UserID giriniz"},
+        "404": {"message": "Belirtilen UserID ile kayit bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "List Warehouses",
+      "method": "GET",
+      "url": "/getWH",
+      "permission": [1],
+      "query": {
+        "id": "number",
+        "name": "string",
+        "pageNo": "number (default: 1)"
+      },
+      "responses": {
+        "200": {
+          "success": true,
+          "page": 1,
+          "limit": 10,
+          "total": 100,
+          "totalPages": 10,
+          "data": [
+            {
+              "warehouseID": "number",
+              "warehouseName": "string",
+              "warehouseAddress": "string",
+              "cityName": "string",
+              "countryName": "string"
+            }
+          ]
+        },
+        "404": {"message": "Hicbir depo kaydi bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Add Warehouse",
+      "method": "POST",
+      "url": "/addWH",
+      "permission": [1],
+      "body": {
+        "warehouseName": "string",
+        "warehouseCityID": "number (required)",
+        "warehouseAddress": "string"
+      },
+      "responses": {
+        "201": {"message": "Depo basariyla eklendi.", "id": "number"},
+        "400": {"message": "WarehouseCityID girilmesi zorunludur."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Edit Warehouse",
+      "method": "PUT",
+      "url": "/editWH?id=",
+      "permission": [1],
+      "query": {"id": "number"},
+      "body": {
+        "warehouseName": "string",
+        "warehouseCityID": "number",
+        "warehouseAddress": "string"
+      },
+      "responses": {
+        "200": {"message": "Depo bilgileri guncellendi."},
+        "404": {"message": "Belirtilen ID ile depo bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Delete Warehouse",
+      "method": "DELETE",
+      "url": "/deleteWH?id=",
+      "permission": [1],
+      "responses": {
+        "200": {"message": "Depo basariyla silindi."},
+        "400": {"message": "Depo bagimli oldugu icin silinemez."},
+        "404": {"message": "Belirtilen ID ile depo bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Add Truck",
+      "method": "POST",
+      "url": "/addTruck",
+      "permission": [1],
+      "body": {
+        "truckBrand": "string",
+        "truckModel": "string"
+      },
+      "responses": {
+        "201": {"message": "Kamyon basariyla eklendi.", "id": "number"},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Delete Truck",
+      "method": "DELETE",
+      "url": "/removeTruck?id=",
+      "permission": [1],
+      "responses": {
+        "200": {"message": "Kamyon basariyla silindi."},
+        "400": {"message": "Bu kamyon modeli sisteme bagli oldugu icin silinemez."},
+        "404": {"message": "Kamyon bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "List All Trucks",
+      "method": "GET",
+      "url": "/listTrucks",
+      "permission": [1, 2],
+      "responses": {
+        "200": [
+          {
+            "truckID": "number",
+            "truckBrand": "string",
+            "truckModel": "string"
+          }
+        ],
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Add Truck Info (Plate)",
+      "method": "POST",
+      "url": "/addTruckInfo",
+      "permission": [1],
+      "body": {
+        "plate": "string",
+        "truckID": "number"
+      },
+      "responses": {
+        "201": {"message": "Arac bilgisi basariyla eklendi."},
+        "400": {"message": "Plaka ve TruckID zorunlu."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Edit Truck Info",
+      "method": "PUT",
+      "url": "/editTruckInfo?id=",
+      "permission": [1],
+      "body": {
+        "plate": "string",
+        "truckID": "number"
+      },
+      "responses": {
+        "200": {"message": "Arac bilgileri guncellendi."},
+        "404": {"message": "Arac bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Delete Truck Info",
+      "method": "DELETE",
+      "url": "/removeTruckInfo?id=",
+      "permission": [1],
+      "responses": {
+        "200": {"message": "Arac basariyla silindi."},
+        "400": {"message": "Arac kombinasyonda oldugu icin silinemez."},
+        "404": {"message": "Arac bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "List Truck Info",
+      "method": "GET",
+      "url": "/listTruckInfo",
+      "permission": [1, 2],
+      "responses": {
+        "200": [
+          {
+            "truckInfoID": "number",
+            "plate": "string",
+            "truckBrand": "string",
+            "truckModel": "string"
+          }
+        ],
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Add Product",
+      "method": "POST",
+      "url": "/addProduct",
+      "permission": [1],
+      "body": {
+        "productShape": "string",
+        "weight": "number",
+        "dimensionX": "number",
+        "dimensionY": "number",
+        "dimensionZ": "number",
+        "isBreakable": "boolean",
+        "status": "string",
+        "sender": "string",
+        "warehouse": "number (required)"
+      },
+      "responses": {
+        "201": {"message": "Urun basariyla eklendi."},
+        "400": {"message": "Warehouse ID zorunlu."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Edit Product",
+      "method": "PUT",
+      "url": "/editProduct?id=",
+      "permission": [1],
+      "responses": {
+        "200": {"message": "Urun bilgileri guncellendi."},
+        "404": {"message": "Urun bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "Delete Product",
+      "method": "DELETE",
+      "url": "/removeProduct?id=",
+      "permission": [1],
+      "responses": {
+        "200": {"message": "Urun basariyla silindi."},
+        "400": {"message": "Urun sipariste oldugu icin silinemez."},
+        "404": {"message": "Urun bulunamadi."},
+        "500": {"error": "Veritabani hatasi."}
+      }
+    },
+
+    {
+      "name": "List All Products",
+      "method": "GET",
+      "url": "/listProducts",
+      "permission": [1, 2],
+      "responses": {
+        "200": [
+          {
+            "productID": "number",
+            "productShape": "string",
+            "weight": "number",
+            "dimensionX": "number",
+            "dimensionY": "number",
+            "dimensionZ": "number",
+            "isBreakable": "boolean",
+            "status": "string",
+            "sender": "string",
+            "warehouse": "number",
+            "warehouseName": "string"
+          }
+        ],
+        "500": {"error": "Veritabani hatasi."}
+      }
+    }
+  ]
+}

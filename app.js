@@ -103,14 +103,35 @@ app.post('/login', async (req, res) => {
   }
 });
 
-app.get('/getUsers', auth, perm(1,2), 
-  async(req,res) => 
-  {
-  const query = `select * from userData`;
-  const [results] = await con.promise().query(query);
-  res.json(results);
-  }
-);
+app.get('/getUsers', auth, perm(1, 2), async (req, res) => {
+    const query = `
+        SELECT 
+            u.userID, 
+            u.username, 
+            ud.email, 
+            ud.tel, 
+            ud.address, 
+            ud.job, 
+            ud.cityID, 
+            ud.warehouseID
+        FROM user u 
+        INNER JOIN userData ud ON u.userID = ud.userID
+    `;
+    
+    try {
+        const [results] = await con.promise().query(query);
+        
+        if (results.length === 0) {
+            return res.status(404).json({ message: "Sistemde hicbir kullanici bulunamadi." });
+        }
+        
+        res.status(200).json(results);
+        
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: "Veritabani hatasi." });
+    }
+});
 
 
 
@@ -199,6 +220,359 @@ app.delete('/deleteUser', auth, perm(1), async(req, res) => {
   }
   catch(err) {
     await connection.rollback();
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.get('/getWH', auth, perm(1), async (req, res) => {
+  const id = req.query.id || '';
+  const name = req.query.name || '';
+  const limit = 10;
+  const pageNo = parseInt(req.query.pageNo) || 1;
+  const offset = (pageNo - 1) * limit;
+
+  const conditions = [];
+  const params = [];
+
+  if (id) {
+    conditions.push("w.warehouseID = ?");
+    params.push(id);
+  }
+
+  if (name) {
+    conditions.push("w.warehouseName LIKE ?");
+    params.push(`%${name}%`);
+  }
+
+  let whereClause = "";
+  if (conditions.length > 0) {
+    whereClause = " WHERE " + conditions.join(" AND ");
+  }
+
+  const dataQuery = `
+      SELECT 
+        w.warehouseID, 
+        w.warehouseName, 
+        w.warehouseAddress, 
+        c.cityName, 
+        co.countryName 
+      FROM warehouse w
+      LEFT JOIN cities c ON w.warehouseCityID = c.cityID
+      LEFT JOIN countries co ON c.countryID = co.countryID
+      ${whereClause}
+      LIMIT ? OFFSET ?`;
+
+  const countQuery = `SELECT COUNT(*) as total FROM warehouse w ${whereClause}`;
+
+  try {
+    const [rows] = await con.promise().query(dataQuery, [...params, limit, offset]);
+    const [countResult] = await con.promise().query(countQuery, params);
+
+    const total = countResult[0].total;
+    const totalPages = Math.ceil(total / limit);
+
+    if (rows.length === 0 && pageNo === 1) {
+       return res.status(404).json({message: "Hicbir depo kaydi bulunamadi."});
+    }
+
+    return res.status(200).json({
+      success: true,
+      page: pageNo,
+      limit: limit,
+      total: total,
+      totalPages: totalPages,
+      data: rows
+    });
+
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.post('/addWH', auth, perm(1), async (req, res) => {
+  const { warehouseName, warehouseCityID, warehouseAddress } = req.body;
+
+  if (!warehouseCityID)
+    return res.status(400).json({message: "WarehouseCityID girilmesi zorunludur."});
+
+  const query = `INSERT INTO warehouse (warehouseName, warehouseCityID, warehouseAddress) VALUES (?, ?, ?)`;
+
+  try {
+    const [result] = await con.promise().query(query, [warehouseName, warehouseCityID, warehouseAddress]);
+    return res.status(201).json({message: "Depo basariyla eklendi.", id: result.insertId});
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.put('/editWH', auth, perm(1), async (req, res) => {
+  const id = req.query.id;
+  const { warehouseName, warehouseCityID, warehouseAddress } = req.body;
+
+  if (!id)
+    return res.status(400).json({message: "ID giriniz => /editWH?id=1"});
+
+  const [search] = await con.promise().query('select count(*) as cnt from warehouse where warehouseID=?', [id]);
+
+  if (search[0].cnt === 0)
+    return res.status(404).json({message: "Belirtilen ID ile depo bulunamadi."});
+
+  const query = `UPDATE warehouse SET warehouseName = ?, warehouseCityID = ?, warehouseAddress = ? WHERE warehouseID = ?`;
+
+  try {
+    await con.promise().query(query, [warehouseName, warehouseCityID, warehouseAddress, id]);
+    return res.status(200).json({message: "Depo bilgileri guncellendi."});
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.delete('/deleteWH', auth, perm(1), async (req, res) => {
+  const id = req.query.id;
+
+  if (!id)
+    return res.status(400).json({message: "ID giriniz => /deleteWH?id=1"});
+
+  const [search] = await con.promise().query('select count(*) as cnt from warehouse where warehouseID=?', [id]);
+
+  if (search[0].cnt === 0)
+    return res.status(404).json({message: "Belirtilen ID ile depo bulunamadi."});
+
+  const query = `DELETE FROM warehouse WHERE warehouseID = ?`;
+
+  try {
+    await con.promise().query(query, [id]);
+    return res.status(200).json({message: "Depo basariyla silindi."});
+  } catch (err) {
+    console.log(err);
+    if (err.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(400).json({message: "Bu depoda urunler veya kullanicilar kayitli oldugu icin silinemez."});
+    }
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.post('/addTruck', auth, perm(1), async (req, res) => {
+  const { truckBrand, truckModel } = req.body;
+
+  const query = `INSERT INTO trucks (truckBrand, truckModel) VALUES (?, ?)`;
+
+  try {
+    const [result] = await con.promise().query(query, [truckBrand, truckModel]);
+    return res.status(201).json({message: "Kamyon basariyla eklendi.", id: result.insertId});
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.delete('/removeTruck', auth, perm(1), async (req, res) => {
+  const id = req.query.id;
+
+  if (!id)
+    return res.status(400).json({message: "ID giriniz => /removeTruck?id=1"});
+
+  const [search] = await con.promise().query('select count(*) as cnt from trucks where truckID=?', [id]);
+
+  if (search[0].cnt === 0)
+    return res.status(404).json({message: "Belirtilen ID ile kamyon bulunamadi."});
+
+  const query = `DELETE FROM trucks WHERE truckID = ?`;
+
+  try {
+    await con.promise().query(query, [id]);
+    return res.status(200).json({message: "Kamyon basariyla silindi."});
+  } catch (err) {
+    console.log(err);
+    if (err.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(400).json({message: "Bu kamyon modeli sisteme kayitli bir araca (TruckInfo) bagli oldugu icin silinemez."});
+    }
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.get('/listTrucks', auth, perm(1, 2), async (req, res) => {
+  const query = `SELECT * FROM trucks`;
+
+  try {
+    const [results] = await con.promise().query(query);
+    res.status(200).json(results);
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.post('/addTruckInfo', auth, perm(1), async (req, res) => {
+  const { plate, truckID } = req.body;
+
+  if (!plate || !truckID)
+    return res.status(400).json({message: "Plaka ve TruckID girilmesi zorunludur."});
+
+  const query = `INSERT INTO truckinfo (plate, truckID) VALUES (?, ?)`;
+
+  try {
+    const [result] = await con.promise().query(query, [plate, truckID]);
+    return res.status(201).json({message: "Arac bilgisi basariyla eklendi.", id: result.insertId});
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.put('/editTruckInfo', auth, perm(1), async (req, res) => {
+  const id = req.query.id;
+  const { plate, truckID } = req.body;
+
+  if (!id)
+    return res.status(400).json({message: "ID giriniz => /editTruckInfo?id=1"});
+
+  const [search] = await con.promise().query('select count(*) as cnt from truckinfo where truckInfoID=?', [id]);
+
+  if (search[0].cnt === 0)
+    return res.status(404).json({message: "Belirtilen ID ile arac bulunamadi."});
+
+  const query = `UPDATE truckinfo SET plate = ?, truckID = ? WHERE truckInfoID = ?`;
+
+  try {
+    await con.promise().query(query, [plate, truckID, id]);
+    return res.status(200).json({message: "Arac bilgileri guncellendi."});
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.delete('/removeTruckInfo', auth, perm(1), async (req, res) => {
+  const id = req.query.id;
+
+  if (!id)
+    return res.status(400).json({message: "ID giriniz => /removeTruckInfo?id=1"});
+
+  const [search] = await con.promise().query('select count(*) as cnt from truckinfo where truckInfoID=?', [id]);
+
+  if (search[0].cnt === 0)
+    return res.status(404).json({message: "Belirtilen ID ile arac bulunamadi."});
+
+  const query = `DELETE FROM truckinfo WHERE truckInfoID = ?`;
+
+  try {
+    await con.promise().query(query, [id]);
+    return res.status(200).json({message: "Arac basariyla silindi."});
+  } catch (err) {
+    console.log(err);
+    if (err.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(400).json({message: "Bu arac bir kombinasyonda (Combination) kullanildigi icin silinemez."});
+    }
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.get('/listTruckInfo', auth, perm(1, 2), async (req, res) => {
+  const query = `
+    SELECT 
+      ti.truckInfoID, 
+      ti.plate, 
+      t.truckBrand, 
+      t.truckModel 
+    FROM truckinfo ti
+    LEFT JOIN trucks t ON ti.truckID = t.truckID
+  `;
+
+  try {
+    const [results] = await con.promise().query(query);
+    res.status(200).json(results);
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.post('/addProduct', auth, perm(1), async (req, res) => {
+  const { productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, warehouse } = req.body;
+
+  if (!warehouse)
+    return res.status(400).json({message: "Warehouse ID girilmesi zorunludur."});
+
+  const query = `INSERT INTO product (productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, dateReceived, warehouse) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`;
+
+  try {
+    const [result] = await con.promise().query(query, [productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, warehouse]);
+    return res.status(201).json({message: "Urun basariyla eklendi.", id: result.insertId});
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.put('/editProduct', auth, perm(1), async (req, res) => {
+  const id = req.query.id;
+  const { productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, warehouse } = req.body;
+
+  if (!id)
+    return res.status(400).json({message: "ID giriniz => /editProduct?id=1"});
+
+  const [search] = await con.promise().query('select count(*) as cnt from product where productID=?', [id]);
+
+  if (search[0].cnt === 0)
+    return res.status(404).json({message: "Belirtilen ID ile urun bulunamadi."});
+
+  const query = `
+    UPDATE product 
+    SET productShape=?, weight=?, dimensionX=?, dimensionY=?, dimensionZ=?, isBreakable=?, status=?, sender=?, warehouse=? 
+    WHERE productID=?`;
+
+  try {
+    await con.promise().query(query, [productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, warehouse, id]);
+    return res.status(200).json({message: "Urun bilgileri guncellendi."});
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.delete('/removeProduct', auth, perm(1), async (req, res) => {
+  const id = req.query.id;
+
+  if (!id)
+    return res.status(400).json({message: "ID giriniz => /removeProduct?id=1"});
+
+  const [search] = await con.promise().query('select count(*) as cnt from product where productID=?', [id]);
+
+  if (search[0].cnt === 0)
+    return res.status(404).json({message: "Belirtilen ID ile urun bulunamadi."});
+
+  const query = `DELETE FROM product WHERE productID = ?`;
+
+  try {
+    await con.promise().query(query, [id]);
+    return res.status(200).json({message: "Urun basariyla silindi."});
+  } catch (err) {
+    console.log(err);
+    if (err.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(400).json({message: "Bu urun bir sipariste (OrderedProducts) yer aldigi icin silinemez."});
+    }
+    return res.status(500).json({error: "Veritabani hatasi."});
+  }
+});
+
+app.get('/listProducts', auth, perm(1, 2), async (req, res) => {
+  const query = `
+    SELECT 
+      p.*, 
+      w.warehouseName 
+    FROM product p
+    LEFT JOIN warehouse w ON p.warehouse = w.warehouseID
+  `;
+
+  try {
+    const [results] = await con.promise().query(query);
+    res.status(200).json(results);
+  } catch (err) {
+    console.log(err);
     return res.status(500).json({error: "Veritabani hatasi."});
   }
 });
