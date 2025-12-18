@@ -299,21 +299,24 @@
       "method": "POST",
       "url": "/addProduct",
       "permission": [1],
+      "description": "Yeni ürün ekler. statusID otomatik olarak 'Beklemede' (Type 1) olarak atanır.",
       "body": {
         "productShape": "string",
         "weight": "number",
         "dimensionX": "number",
         "dimensionY": "number",
         "dimensionZ": "number",
-        "isBreakable": "boolean",
-        "status": "string",
+        "isBreakable": "boolean (0 or 1)",
         "sender": "string",
         "warehouse": "number (required)"
       },
       "responses": {
-        "201": {"message": "Urun basariyla eklendi."},
-        "400": {"message": "Warehouse ID zorunlu."},
-        "500": {"error": "Veritabani hatasi."}
+        "201": {
+          "message": "Urun ve baslangic statüsü basariyla eklendi.",
+          "id": "number"
+        },
+        "400": { "message": "Warehouse ID zorunlu." },
+        "500": { "error": "Veritabani hatasi." }
       }
     },
 
@@ -322,23 +325,21 @@
       "method": "PUT",
       "url": "/editProduct?id=",
       "permission": [1],
+      "query": { "id": "number" },
+      "body": {
+        "productShape": "string",
+        "weight": "number",
+        "dimensionX": "number",
+        "dimensionY": "number",
+        "dimensionZ": "number",
+        "isBreakable": "boolean",
+        "sender": "string",
+        "warehouse": "number"
+      },
       "responses": {
-        "200": {"message": "Urun bilgileri guncellendi."},
-        "404": {"message": "Urun bulunamadi."},
-        "500": {"error": "Veritabani hatasi."}
-      }
-    },
-
-    {
-      "name": "Delete Product",
-      "method": "DELETE",
-      "url": "/removeProduct?id=",
-      "permission": [1],
-      "responses": {
-        "200": {"message": "Urun basariyla silindi."},
-        "400": {"message": "Urun sipariste oldugu icin silinemez."},
-        "404": {"message": "Urun bulunamadi."},
-        "500": {"error": "Veritabani hatasi."}
+        "200": { "message": "Urun bilgileri guncellendi." },
+        "404": { "message": "Urun bulunamadi." },
+        "500": { "error": "Veritabani hatasi." }
       }
     },
 
@@ -347,6 +348,7 @@
       "method": "GET",
       "url": "/listProducts",
       "permission": [1, 2],
+      "description": "Tüm ürünleri bağlı oldukları depo adı ve güncel statü isimleriyle getirir.",
       "responses": {
         "200": [
           {
@@ -357,13 +359,16 @@
             "dimensionY": "number",
             "dimensionZ": "number",
             "isBreakable": "boolean",
-            "status": "string",
             "sender": "string",
             "warehouse": "number",
-            "warehouseName": "string"
+            "warehouseName": "string",
+            "statusID": "number",
+            "statusName": "string (e.g. Beklemede)",
+            "statusDate": "datetime",
+            "dateReceived": "datetime"
           }
         ],
-        "500": {"error": "Veritabani hatasi."}
+        "500": { "error": "Veritabani hatasi." }
       }
     }
   ]

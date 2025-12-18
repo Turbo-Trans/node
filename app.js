@@ -10,7 +10,7 @@ const auth = require('./components/auth');
 const perm = require('./components/perm');
 
 
-var regularExpression = /^(?=.*[0-9])(?=.*[!@#$%^&*])[a-zA-Z0-9!@#$%^&*]{8,64}$/;
+var regularExpression = /^(?=.\d)(?=.[!@#$%^&._])[A-Za-z\d!@#$%^&._]{8,64}$/;
 
 
 app.use(cors({
@@ -165,7 +165,7 @@ app.post('/addUser', auth, perm(1),
 
     try {
 
-      const hashedPassword = await bcrypt.hash("123456", 12);
+      const hashedPassword = await bcrypt.hash(password, 12);
 
       query = "insert into user(username,password,permission) values (?,?,?)";
       let [result] = await con.promise().query(query, [username,hashedPassword,permission]);
@@ -492,70 +492,56 @@ app.get('/listTruckInfo', auth, perm(1, 2), async (req, res) => {
 });
 
 app.post('/addProduct', auth, perm(1), async (req, res) => {
-  const { productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, warehouse } = req.body;
+  const { productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, sender, warehouse } = req.body;
 
-  if (!warehouse)
-    return res.status(400).json({message: "Warehouse ID girilmesi zorunludur."});
+  if (!warehouse) return res.status(400).json({ message: "Warehouse ID girilmesi zorunludur." });
 
-  const query = `INSERT INTO product (productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, dateReceived, warehouse) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`;
+  const connection = await con.promise().getConnection();
 
   try {
-    const [result] = await con.promise().query(query, [productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, warehouse]);
-    return res.status(201).json({message: "Urun basariyla eklendi.", id: result.insertId});
+    await connection.beginTransaction();
+
+    const [statusResult] = await connection.query(
+      "INSERT INTO status (statusType, statusDate) VALUES (?, NOW())", 
+      [1]
+    );
+    const newStatusID = statusResult.insertId;
+
+    const [productResult] = await connection.query(
+      `INSERT INTO product (productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, statusID, sender, dateReceived, warehouse) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+      [productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, newStatusID, sender, warehouse]
+    );
+
+    await connection.commit();
+    res.status(201).json({ message: "Urun ve baslangic statüsü basariyla eklendi.", id: productResult.insertId });
   } catch (err) {
-    console.log(err);
-    return res.status(500).json({error: "Veritabani hatasi."});
+    await connection.rollback();
+    console.error(err);
+    res.status(500).json({ error: "Veritabani hatasi." });
+  } finally {
+    connection.release();
   }
 });
 
 app.put('/editProduct', auth, perm(1), async (req, res) => {
   const id = req.query.id;
-  const { productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, warehouse } = req.body;
+  const { productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, sender, warehouse } = req.body;
 
-  if (!id)
-    return res.status(400).json({message: "ID giriniz => /editProduct?id=1"});
-
-  const [search] = await con.promise().query('select count(*) as cnt from product where productID=?', [id]);
-
-  if (search[0].cnt === 0)
-    return res.status(404).json({message: "Belirtilen ID ile urun bulunamadi."});
+  if (!id) return res.status(400).json({ message: "ID giriniz." });
 
   const query = `
     UPDATE product 
-    SET productShape=?, weight=?, dimensionX=?, dimensionY=?, dimensionZ=?, isBreakable=?, status=?, sender=?, warehouse=? 
+    SET productShape=?, weight=?, dimensionX=?, dimensionY=?, dimensionZ=?, isBreakable=?, sender=?, warehouse=? 
     WHERE productID=?`;
 
   try {
-    await con.promise().query(query, [productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, status, sender, warehouse, id]);
-    return res.status(200).json({message: "Urun bilgileri guncellendi."});
+    const [result] = await con.promise().query(query, [productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, sender, warehouse, id]);
+    if (result.affectedRows === 0) return res.status(404).json({ message: "Urun bulunamadi." });
+    res.status(200).json({ message: "Urun bilgileri guncellendi." });
   } catch (err) {
-    console.log(err);
-    return res.status(500).json({error: "Veritabani hatasi."});
-  }
-});
-
-app.delete('/removeProduct', auth, perm(1), async (req, res) => {
-  const id = req.query.id;
-
-  if (!id)
-    return res.status(400).json({message: "ID giriniz => /removeProduct?id=1"});
-
-  const [search] = await con.promise().query('select count(*) as cnt from product where productID=?', [id]);
-
-  if (search[0].cnt === 0)
-    return res.status(404).json({message: "Belirtilen ID ile urun bulunamadi."});
-
-  const query = `DELETE FROM product WHERE productID = ?`;
-
-  try {
-    await con.promise().query(query, [id]);
-    return res.status(200).json({message: "Urun basariyla silindi."});
-  } catch (err) {
-    console.log(err);
-    if (err.code === 'ER_ROW_IS_REFERENCED_2') {
-      return res.status(400).json({message: "Bu urun bir sipariste (OrderedProducts) yer aldigi icin silinemez."});
-    }
-    return res.status(500).json({error: "Veritabani hatasi."});
+    console.error(err);
+    res.status(500).json({ error: "Veritabani hatasi." });
   }
 });
 
@@ -563,20 +549,23 @@ app.get('/listProducts', auth, perm(1, 2), async (req, res) => {
   const query = `
     SELECT 
       p.*, 
-      w.warehouseName 
+      w.warehouseName,
+      st.statusName,
+      s.statusDate
     FROM product p
     LEFT JOIN warehouse w ON p.warehouse = w.warehouseID
+    LEFT JOIN status s ON p.statusID = s.statusID
+    LEFT JOIN statustype st ON s.statusType = st.statusTypeID
   `;
 
   try {
     const [results] = await con.promise().query(query);
     res.status(200).json(results);
   } catch (err) {
-    console.log(err);
-    return res.status(500).json({error: "Veritabani hatasi."});
+    console.error(err);
+    res.status(500).json({ error: "Veritabani hatasi." });
   }
 });
-
 
 app.use((req, res) => {
   res.status(404).json({message: "Bu API bulunmuyor."})
