@@ -52,7 +52,7 @@ app.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
-      return res.status(400).json({ message: "Bilgileri tam girin, Eksik bilgi girisi" });
+      return res.status(400).json({ message: "Bilgiler eksik!" });
     }
 
     const query = `
