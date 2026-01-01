@@ -193,7 +193,7 @@ app.delete('/deleteUser', auth, perm(1), async(req, res) => {
   return res.status(404).json({message: "Belirtilen UserID ile kayit bulunamadi."});
 
   const query1 = `delete from userdata where userID = ?`;
-  const query2 = `delete from users where userID = ?`;
+  const query2 = `delete from user where userID = ?`;
   const connection = await con.promise().getConnection();
 
   try {
