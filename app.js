@@ -9,8 +9,7 @@ const con = require("./components/db");
 const auth = require('./components/auth');
 const perm = require('./components/perm');
 
-
-var regularExpression = /^(?=.\d)(?=.[!@#$%^&._])[A-Za-z\d!@#$%^&._]{8,64}$/;
+var regularExpression = /^(?=.*\d)(?=.*[!@#$%^&._])[A-Za-z\d!@#$%^&._]{8,64}$/;
 
 
 app.use(cors({
