@@ -102,8 +102,100 @@ app.post('/login', async (req, res) => {
   }
 });
 
+
+app.get('/getCountries', auth, perm(1,2),
+async(req, res) => {
+  try{
+    const query = 'select * from countries';
+    const [result] = await con.promise().query(query);
+    if(result.length ===0)
+    {
+      return res.status(200).json({message: "Sistemde Henüz Ülke Yok"})
+    }
+    return res.status(200).json(result)
+  }
+  catch (error)
+  {
+    return res.status(500).json({message: error.message});
+  }
+});
+
+app.get('/getCities', auth, perm(1, 2), async (req, res) => {
+  const id = req.query.id || '';
+  try {
+    if(!id)
+    return res.status(400).json({message: "Bu işlem sadece ID ile çalışır => /getCities?id=1"});
+    const query = 'select * from cities where cities.countryID = ?';
+    const [results] = await con.promise().query(query, [id]);
+    if(!results[0])
+    {
+      return res.status(200).json({message: "Belirttiğin ID'ye kayıtlı şehir yok."});
+    }
+    return res.status(200).json(results);
+  }
+  catch (error) {
+    return res.status(500).json({message: error.message});
+  }
+
+})
+
 app.get('/getUsers', auth, perm(1, 2), async (req, res) => {
-    const query = `
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 10, 100);
+    const offset = (page - 1) * limit;
+
+    const {
+        username,
+        email,
+        cityID,
+        warehouseID,
+        job,
+        sortBy = "userID",
+        sortOrder = "DESC"
+    } = req.query;
+
+    const allowedSortFields = [
+        "userID",
+        "username",
+        "email",
+        "cityID",
+        "warehouseID"
+    ];
+
+    const orderBy = allowedSortFields.includes(sortBy) ? sortBy : "userID";
+    const orderDir = sortOrder.toUpperCase() === "ASC" ? "ASC" : "DESC";
+
+    let where = [];
+    let params = [];
+
+    if (username) {
+        where.push("u.username LIKE ?");
+        params.push(`%${username}%`);
+    }
+
+    if (email) {
+        where.push("ud.email LIKE ?");
+        params.push(`%${email}%`);
+    }
+
+    if (cityID) {
+        where.push("ud.cityID = ?");
+        params.push(cityID);
+    }
+
+    if (warehouseID) {
+        where.push("ud.warehouseID = ?");
+        params.push(warehouseID);
+    }
+
+    if (job) {
+        where.push("ud.job LIKE ?");
+        params.push(`%${job}%`);
+    }
+
+    const whereSQL = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const dataQuery = `
         SELECT 
             u.userID, 
             u.username, 
@@ -113,24 +205,43 @@ app.get('/getUsers', auth, perm(1, 2), async (req, res) => {
             ud.job, 
             ud.cityID, 
             ud.warehouseID
-        FROM user u 
-        INNER JOIN userData ud ON u.userID = ud.userID
+        FROM user u
+        LEFT JOIN userData ud ON u.userID = ud.userID
+        ${whereSQL}
+        ORDER BY ${orderBy} ${orderDir}
+        LIMIT ? OFFSET ?
     `;
-    
+
+    const countQuery = `
+        SELECT COUNT(*) AS total
+        FROM user u
+        LEFT JOIN userData ud ON u.userID = ud.userID
+        ${whereSQL}
+    `;
+
     try {
-        const [results] = await con.promise().query(query);
-        
+        const [[{ total }]] = await con.promise().query(countQuery, params);
+        const [results] = await con.promise().query(dataQuery, [...params, limit, offset]);
+
         if (results.length === 0) {
-            return res.status(404).json({ message: "Sistemde hicbir kullanici bulunamadi." });
+            return res.status(404).json({ message: "Kullanıcı bulunamadı." });
         }
-        
-        res.status(200).json(results);
-        
+
+        res.status(200).json({
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            filters: req.query,
+            data: results
+        });
+
     } catch (err) {
         console.error(err);
-        return res.status(500).json({ error: "Veritabani hatasi." });
+        res.status(500).json({ error: "Veritabanı hatası." });
     }
 });
+
 
 
 
