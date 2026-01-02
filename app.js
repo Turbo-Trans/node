@@ -38,11 +38,11 @@ app.use("/", express.static(path.join(__dirname, "public")));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   console.log(`Node sunucusu ${PORT} portunda baslatildi.`);
-  try {
+  /*try {
     const [result] = await con.promise().query("UPDATE user SET sessionToken = NULL");
   } catch (err) {
     console.error("SYSTEM ERROR", err);
-  }
+  }*/
 });
 
 
@@ -833,48 +833,311 @@ app.get('/listTruckInfo', auth, perm(1, 2), async (req, res) => {
   }
 });
 
-app.put('/editProduct', auth, perm(1), async (req, res) => {
-  const id = req.query.id;
-  const { productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, sender, warehouse } = req.body;
 
-  if (!id) return res.status(400).json({ message: "ID giriniz." });
-
-  const query = `
-    UPDATE product 
-    SET productShape=?, weight=?, dimensionX=?, dimensionY=?, dimensionZ=?, isBreakable=?, sender=?, warehouse=? 
-    WHERE productID=?`;
-
-  try {
-    const [result] = await con.promise().query(query, [productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, sender, warehouse, id]);
-    if (result.affectedRows === 0) return res.status(404).json({ message: "Urun bulunamadi." });
-    res.status(200).json({ message: "Urun bilgileri guncellendi." });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Veritabani hatasi." });
-  }
-});
 
 app.get('/listProducts', auth, perm(1, 2), async (req, res) => {
-  const query = `
-    SELECT 
-      p.*, 
-      w.warehouseName,
-      st.statusName,
-      s.statusDate
-    FROM product p
-    LEFT JOIN warehouse w ON p.warehouse = w.warehouseID
-    LEFT JOIN status s ON p.statusID = s.statusID
-    LEFT JOIN statustype st ON s.statusType = st.statusTypeID
-  `;
-
   try {
-    const [results] = await con.promise().query(query);
-    res.status(200).json(results);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    const {
+      id,
+      shape,
+      sender,
+      date,
+      breakable,
+      status
+    } = req.query;
+
+    const userID = req.user.userID;
+    const [uid] = await con
+      .promise()
+      .query('SELECT warehouseID FROM userdata WHERE userID = ?', [userID]);
+
+    const warehouseID = uid[0]?.warehouseID;
+
+    if (!warehouseID) {
+      return res.status(403).json({ message: 'Depoda çalışmıyorsun!' });
+    }
+
+    let whereConditions = ['product.warehouse = ?'];
+    let params = [warehouseID];
+
+    if (id) {
+      whereConditions.push('product.productID LIKE ?');
+      params.push(`%${id}%`);
+    }
+
+    if (shape) {
+      whereConditions.push('product.productShape LIKE ?');
+      params.push(`%${shape}%`);
+    }
+
+    if (sender) {
+      whereConditions.push('product.sender LIKE ?');
+      params.push(`%${sender}%`);
+    }
+
+    if (date) {
+      whereConditions.push('DATE(product.dateReceived) = ?');
+      params.push(date);
+    }
+
+    if (breakable) {
+      whereConditions.push('product.isBreakable = ?');
+      params.push(breakable);
+    }
+
+    if (status) {
+      whereConditions.push('status.statusType = ?');
+      params.push(status);
+    }
+
+    const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+
+    const dataQuery = `
+      SELECT 
+        product.*, 
+        statustype.statusName,
+        status.statusDate,
+        status.statusType
+      FROM product
+      LEFT JOIN status ON product.statusID = status.statusID
+      LEFT JOIN statustype ON status.statusType = statustype.statusTypeID
+      ${whereClause}
+      ORDER BY product.dateReceived DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const [rows] = await con
+      .promise()
+      .query(dataQuery, [...params, limit, offset]);
+
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      FROM product
+      LEFT JOIN status ON product.statusID = status.statusID
+      ${whereClause}
+    `;
+
+    const [[{ total }]] = await con
+      .promise()
+      .query(countQuery, params);
+
+    res.json({
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: rows
+    });
+
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Veritabani hatasi." });
+    res.status(500).json({ message: 'SQL hatasi' });
   }
 });
+
+app.post('/addProduct', auth, perm(1, 2), async (req, res) => {
+  const {
+    productShape,
+    sender,
+    isBreakable,
+    weight,
+    dimensionX,
+    dimensionY,
+    dimensionZ
+  } = req.body;
+
+  if (!productShape || !sender) {
+    return res.status(400).json({ message: "Eksik alan girisi." });
+  }
+
+  try {
+    const connection = await con.promise().getConnection();
+    await connection.beginTransaction();
+
+    const [userWH] = await connection.query(
+      'SELECT warehouseID FROM userdata WHERE userID = ?',
+      [req.user.userID]
+    );
+
+    if (!userWH[0]?.warehouseID) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Depo bilgin bulunamadi." });
+    }
+
+    const warehouseID = userWH[0].warehouseID;
+
+    const [statusResult] = await connection.query(
+      'INSERT INTO status (statusType, statusDate) VALUES (1, NOW())'
+    );
+    const newStatusID = statusResult.insertId;
+
+    const insertQuery = `
+      INSERT INTO product 
+      (productShape, sender, isBreakable, weight, dimensionX, dimensionY, dimensionZ, warehouse, statusID, dateReceived)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `;
+
+    const [productResult] = await connection.query(insertQuery, [
+      productShape,
+      sender,
+      isBreakable || 0,
+      weight || 0,
+      dimensionX || 0,
+      dimensionY || 0,
+      dimensionZ || 0,
+      warehouseID,
+      newStatusID
+    ]);
+
+    await connection.commit();
+    connection.release();
+
+    return res.status(201).json({
+      message: "Urun basariyla eklendi.",
+      productID: productResult.insertId
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Veritabani hatasi." });
+  }
+});
+
+app.put('/editProduct', auth, perm(1, 2), async (req, res) => {
+  const id = req.query.id;
+  const {
+    productShape,
+    sender,
+    isBreakable,
+    weight,
+    dimensionX,
+    dimensionY,
+    dimensionZ,
+    statusID
+  } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ message: "ID giriniz => /editProduct?id=1" });
+  }
+
+  try {
+    const connection = await con.promise().getConnection();
+    await connection.beginTransaction();
+
+    const [search] = await connection.query(
+      'SELECT warehouse, statusID FROM product WHERE productID = ?',
+      [id]
+    );
+
+    if (!search[0]) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Urun bulunamadi." });
+    }
+
+    const [userWH] = await connection.query(
+      'SELECT warehouseID FROM userdata WHERE userID = ?',
+      [req.user.userID]
+    );
+
+    if (search[0].warehouse !== userWH[0]?.warehouseID) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Bu urunu guncelleyemezsin." });
+    }
+
+    const updateProductQuery = `
+      UPDATE product SET
+        productShape = ?,
+        sender = ?,
+        isBreakable = ?,
+        weight = ?,
+        dimensionX = ?,
+        dimensionY = ?,
+        dimensionZ = ?
+      WHERE productID = ?
+    `;
+
+    await connection.query(updateProductQuery, [
+      productShape,
+      sender,
+      isBreakable,
+      weight,
+      dimensionX,
+      dimensionY,
+      dimensionZ,
+      id
+    ]);
+
+    if (statusID) {
+      const currentStatusRowID = search[0].statusID;
+      await connection.query(
+        'UPDATE status SET statusType = ?, statusDate = NOW() WHERE statusID = ?',
+        [statusID, currentStatusRowID]
+      );
+    }
+
+    await connection.commit();
+    connection.release();
+
+    return res.status(200).json({ message: "Urun guncellendi." });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Veritabani hatasi." });
+  }
+});
+
+app.delete('/deleteProduct', auth, perm(1,2), async (req, res) => {
+  const id = req.query.id;
+
+  if (!id) {
+    return res.status(400).json({ message: "ID giriniz => /deleteProduct?id=1" });
+  }
+
+  try {
+    const connection = await con.promise().getConnection();
+    await connection.beginTransaction();
+
+    const [search] = await connection.query(
+      'SELECT productID, statusID FROM product WHERE productID = ?',
+      [id]
+    );
+
+    if (!search[0]) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Urun bulunamadi." });
+    }
+
+    const statusRowID = search[0].statusID;
+
+    await connection.query(
+      'DELETE FROM product WHERE productID = ?',
+      [id]
+    );
+
+    if (statusRowID) {
+      await connection.query(
+        'DELETE FROM status WHERE statusID = ?',
+        [statusRowID]
+      );
+    }
+
+    await connection.commit();
+    connection.release();
+
+    return res.status(200).json({ message: "Urun basariyla silindi." });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Veritabani hatasi." });
+  }
+});
+
+
+
 
 app.use((req, res) => {
   res.status(404).json({message: "Bu API bulunmuyor."})
