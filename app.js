@@ -2,6 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const jwt = require("jsonwebtoken");
+const { v4: uuidv4 } = require("uuid");
 const app = express();
 var path = require("path");
 const bcrypt = require("bcrypt");
@@ -9,7 +10,6 @@ const con = require("./components/db");
 const auth = require('./components/auth');
 const perm = require('./components/perm');
 
-var regularExpression = /^(?=.*\d)(?=.*[!@#$%^&._])[A-Za-z\d!@#$%^&._]{8,64}$/;
 
 
 app.use(cors({
@@ -55,7 +55,17 @@ app.post('/login', async (req, res) => {
     }
 
     const query = `
-      SELECT u.userID, u.username, u.password, u.permission, ud.email, ud.tel, ud.cityID, ud.address, ud.job, ud.warehouseID
+      SELECT 
+        u.userID, 
+        u.username, 
+        u.password, 
+        u.permission,
+        ud.email, 
+        ud.tel, 
+        ud.cityID, 
+        ud.address, 
+        ud.job, 
+        ud.warehouseID
       FROM user u
       LEFT JOIN userdata ud ON u.userID = ud.userID
       WHERE u.username = ?
@@ -75,14 +85,26 @@ app.post('/login', async (req, res) => {
       return res.status(401).json({ message: "Yanlis sifre" });
     }
 
+    const sessionToken = uuidv4();
+
+    await con.promise().query(
+      "UPDATE user SET sessionToken = ? WHERE userID = ?",
+      [sessionToken, user.userID]
+    );
+
     const token = jwt.sign(
-      { userID: user.userID, username: user.username , permission: user.permission},
+      {
+        userID: user.userID,
+        username: user.username,
+        permission: user.permission,
+        sessionToken
+      },
       process.env.JWT_SECRET || "secretkey",
       { expiresIn: "7d" }
     );
 
-    res.json({
-      message: "Giris Basarili.",
+    return res.status(200).json({
+      message: "Giris basarili",
       token,
       user: {
         userID: user.userID,
@@ -98,7 +120,27 @@ app.post('/login', async (req, res) => {
 
   } catch (error) {
     console.error("Login error:", error);
-    res.status(500).json({ message: "Sunucu hatasi" });
+    return res.status(500).json({ message: "Sunucu hatasi" });
+  }
+});
+
+
+app.post('/logout', auth, async (req, res) => {
+  try {
+    await con.promise().query(
+      "UPDATE user SET sessionToken = NULL WHERE userID = ?",
+      [req.user.userID]
+    );
+
+    return res.status(200).json({
+      message: "Cikis basarili"
+    });
+
+  } catch (err) {
+    console.error("Logout error:", err);
+    return res.status(500).json({
+      message: "Sunucu hatasi"
+    });
   }
 });
 
@@ -167,6 +209,8 @@ app.get('/getUsers', auth, perm(1, 2), async (req, res) => {
 
     let where = [];
     let params = [];
+    where.push("u.userID != ?");
+    params.push(req.user.userID);
 
     if (username) {
         where.push("u.username LIKE ?");
@@ -245,61 +289,116 @@ app.get('/getUsers', auth, perm(1, 2), async (req, res) => {
 
 
 
-app.post('/addUser', auth, perm(1),
-  async(req,res) =>
-  {
-    let {
-      username,
-      password,
-      permission,
-      email,
-      tel,
-      cityID,
-      address,
-      job,
-      warehouseID
-    } = req.body;
+app.post('/addUser', auth, perm(1), async (req, res) => {
+  let {
+    username,
+    password,
+    permission,
+    email,
+    tel,
+    cityID,
+    address,
+    job,
+    warehouseID
+  } = req.body;
 
+  if (
+    !username ||
+    !password ||
+    !permission ||
+    !email ||
+    !tel ||
+    !cityID ||
+    !address ||
+    !job ||
+    !warehouseID
+  ) {
+    return res.status(400).json({ message: "Eksik alan girisi." });
+  }
 
-    if(!username || !password || !permission || !email || !tel || !cityID || !address || !job || !warehouseID)
-    return res.status(400).json({message: "Eksik alan girisi."});
+  if (username.length > 50) {
+    return res
+      .status(400)
+      .json({ message: "Kullanici Adi 50 karakterden buyuk olamaz" });
+  }
+  if (password.length < 8 || password.length > 64) {
+    return res.status(400).json({
+      message: "Sifre en az 8, en fazla 64 karakter olmalidir"
+    });
+  }
 
-    if(username.length > 50)
-    {
-      return res.status(400).json({message: "Kullanici Adi 50 karakterden buyuk olamaz"});
-    }
+  let hasUpperCase = false;
+  let hasNumber = false;
+  let hasSpecialChar = false;
 
-    if(!regularExpression.test(password))
-    {
-    return res.status(400).json({message: "En Az 8, En Fazla 64 Karakter. Bir Sayi ve Bir Ozel karakter icermeli"})}
+  const specialChars = "!@#$%^&*()_+-=[]{}|;:'\",.<>?/`~";
 
-    try {
+  for (let i = 0; i < password.length; i++) {
+    const char = password[i];
 
-      const hashedPassword = await bcrypt.hash(password, 12);
-
-      query = "insert into user(username,password,permission) values (?,?,?)";
-      let [result] = await con.promise().query(query, [username,hashedPassword,permission]);
-      const userID = result.insertId;
-      query = "insert into userdata(userID,email,tel,cityID,address,job,warehouseID) values (?,?,?,?,?,?,?)";
-      result = await con.promise().query(query,[userID,email,tel,cityID,address,job,warehouseID]);
-      res.status(200).json({message: "Islem Basarili"});
-    }
-    catch (error) {
-      console.error("SQL Hatasi", error);
-      return res.status(500).json({error: "SQL Hatasi"})
+    if (char >= 'A' && char <= 'Z') {
+      hasUpperCase = true;
+    } else if (char >= '0' && char <= '9') {
+      hasNumber = true;
+    } else if (specialChars.includes(char)) {
+      hasSpecialChar = true;
     }
   }
 
-);
+  if (!hasUpperCase) {
+    return res.status(400).json({
+      message: "Sifre en az 1 buyuk harf icermelidir"
+    });
+  }
+
+  if (!hasNumber) {
+    return res.status(400).json({
+      message: "Sifre en az 1 rakam icermelidir"
+    });
+  }
+
+  if (!hasSpecialChar) {
+    return res.status(400).json({
+      message: "Sifre en az 1 ozel karakter icermelidir"
+    });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    let query =
+      "INSERT INTO user (username, password, permission) VALUES (?, ?, ?)";
+    let [result] = await con
+      .promise()
+      .query(query, [username, hashedPassword, permission]);
+
+    const userID = result.insertId;
+
+    query =
+      "INSERT INTO userdata (userID, email, tel, cityID, address, job, warehouseID) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    await con
+      .promise()
+      .query(query, [userID, email, tel, cityID, address, job, warehouseID]);
+
+    res.status(200).json({ message: "Islem Basarili" });
+  } catch (error) {
+    console.error("SQL Hatasi", error);
+    return res.status(500).json({ error: "SQL Hatasi" });
+  }
+});
+
 
 
 app.delete('/deleteUser', auth, perm(1), async (req, res) => {
   const id = req.query.userID;
 
   if (!id) {
-    return res
-      .status(400)
-      .json({ message: "UserID giriniz => /deleteUser?userID=1" });
+    return res.status(400).json({ message: "UserID giriniz => /deleteUser?userID=1" });
+  }
+
+  if(id === req.user.userID)
+  {
+    return res.status(400).json({message: "Kendini silemezsin."})
   }
 
   try {
