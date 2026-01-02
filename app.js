@@ -206,7 +206,7 @@ app.get('/getUsers', auth, perm(1, 2), async (req, res) => {
             ud.cityID, 
             ud.warehouseID
         FROM user u
-        LEFT JOIN userData ud ON u.userID = ud.userID
+        LEFT JOIN userdata ud ON u.userID = ud.userID
         ${whereSQL}
         ORDER BY ${orderBy} ${orderDir}
         LIMIT ? OFFSET ?
@@ -215,7 +215,7 @@ app.get('/getUsers', auth, perm(1, 2), async (req, res) => {
     const countQuery = `
         SELECT COUNT(*) AS total
         FROM user u
-        LEFT JOIN userData ud ON u.userID = ud.userID
+        LEFT JOIN userdata ud ON u.userID = ud.userID
         ${whereSQL}
     `;
 
