@@ -36,8 +36,13 @@ app.use("/", express.static(path.join(__dirname, "public")));
 
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Node sunucusu ${PORT} portunda baslatildi.`);
+  try {
+    const [result] = await con.promise().query("UPDATE user SET sessionToken = NULL");
+  } catch (err) {
+    console.error("SYSTEM ERROR", err);
+  }
 });
 
 
@@ -641,11 +646,50 @@ app.delete('/removeTruck', auth, perm(1), async (req, res) => {
 });
 
 app.get('/listTrucks', auth, perm(1, 2), async (req, res) => {
-  const query = `SELECT * FROM trucks`;
-
   try {
-    const [results] = await con.promise().query(query);
-    res.status(200).json(results);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    const { truckBrand, truckModel } = req.query;
+
+    let whereConditions = [];
+    let queryParams = [];
+
+    if (truckBrand) {
+      whereConditions.push("truckBrand LIKE ?");
+      queryParams.push(`%${truckBrand}%`);
+    }
+
+    if (truckModel) {
+      whereConditions.push("truckModel LIKE ?");
+      queryParams.push(`%${truckModel}%`);
+    }
+
+    let whereClause = "";
+    if (whereConditions.length > 0) {
+      whereClause = " WHERE " + whereConditions.join(" AND ");
+    }
+
+    const countQuery = `SELECT COUNT(*) as total FROM trucks` + whereClause;
+    const [countResult] = await con.promise().query(countQuery, queryParams);
+    const totalItems = countResult[0].total;
+
+    const dataQuery = `SELECT * FROM trucks` + whereClause + ` LIMIT ? OFFSET ?`;
+    const dataParams = [...queryParams, limit, offset];
+    
+    const [results] = await con.promise().query(dataQuery, dataParams);
+
+    res.status(200).json({
+      data: results,
+      pagination: {
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+        currentPage: page,
+        itemsPerPage: limit
+      }
+    });
+
   } catch (err) {
     console.log(err);
     return res.status(500).json({error: "Veritabani hatasi."});
@@ -718,55 +762,74 @@ app.delete('/removeTruckInfo', auth, perm(1), async (req, res) => {
 });
 
 app.get('/listTruckInfo', auth, perm(1, 2), async (req, res) => {
-  const query = `
-    SELECT 
-      ti.truckInfoID, 
-      ti.plate, 
-      t.truckBrand, 
-      t.truckModel 
-    FROM truckinfo ti
-    LEFT JOIN trucks t ON ti.truckID = t.truckID
-  `;
-
   try {
-    const [results] = await con.promise().query(query);
-    res.status(200).json(results);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    const { plate, truckBrand, truckModel } = req.query;
+
+    let whereConditions = [];
+    let queryParams = [];
+
+    if (plate) {
+      whereConditions.push("ti.plate LIKE ?");
+      queryParams.push(`%${plate}%`);
+    }
+
+    if (truckBrand) {
+      whereConditions.push("t.truckBrand LIKE ?");
+      queryParams.push(`%${truckBrand}%`);
+    }
+
+    if (truckModel) {
+      whereConditions.push("t.truckModel LIKE ?");
+      queryParams.push(`%${truckModel}%`);
+    }
+
+    let whereClause = "";
+    if (whereConditions.length > 0) {
+      whereClause = " WHERE " + whereConditions.join(" AND ");
+    }
+
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM truckinfo ti 
+      LEFT JOIN trucks t ON ti.truckID = t.truckID
+    ` + whereClause;
+
+    const [countResult] = await con.promise().query(countQuery, queryParams);
+    const totalItems = countResult[0].total;
+
+    const dataQuery = `
+      SELECT 
+        ti.truckInfoID, 
+        ti.plate, 
+        t.truckBrand, 
+        t.truckModel 
+      FROM truckinfo ti
+      LEFT JOIN trucks t ON ti.truckID = t.truckID
+      ${whereClause}
+      LIMIT ? OFFSET ?
+    `;
+
+    const dataParams = [...queryParams, limit, offset];
+    
+    const [results] = await con.promise().query(dataQuery, dataParams);
+
+    res.status(200).json({
+      data: results,
+      pagination: {
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+        currentPage: page,
+        itemsPerPage: limit
+      }
+    });
+
   } catch (err) {
     console.log(err);
     return res.status(500).json({error: "Veritabani hatasi."});
-  }
-});
-
-app.post('/addProduct', auth, perm(1), async (req, res) => {
-  const { productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, sender, warehouse } = req.body;
-
-  if (!warehouse) return res.status(400).json({ message: "Warehouse ID girilmesi zorunludur." });
-
-  const connection = await con.promise().getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [statusResult] = await connection.query(
-      "INSERT INTO status (statusType, statusDate) VALUES (?, NOW())", 
-      [1]
-    );
-    const newStatusID = statusResult.insertId;
-
-    const [productResult] = await connection.query(
-      `INSERT INTO product (productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, statusID, sender, dateReceived, warehouse) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
-      [productShape, weight, dimensionX, dimensionY, dimensionZ, isBreakable, newStatusID, sender, warehouse]
-    );
-
-    await connection.commit();
-    res.status(201).json({ message: "Urun ve baslangic statüsü basariyla eklendi.", id: productResult.insertId });
-  } catch (err) {
-    await connection.rollback();
-    console.error(err);
-    res.status(500).json({ error: "Veritabani hatasi." });
-  } finally {
-    connection.release();
   }
 });
 
