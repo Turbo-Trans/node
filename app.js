@@ -328,10 +328,23 @@ app.delete('/deleteUser', auth, perm(1), async(req, res) => {
     connection.release();
     return res.status(201).json({message: "Bilgiler basariyla silindi."});
   }
-  catch(err) {
+  catch (err) {
     await connection.rollback();
-    return res.status(500).json({error: "Veritabani hatasi."});
-  }
+    connection.release();
+
+    console.error("SQL ERROR:", err);
+
+    return res.status(500).json({
+      message: "Veritabanı hatası oluştu.",
+      sqlError: {
+        code: err.code,
+        errno: err.errno,
+        sqlMessage: err.sqlMessage,
+        sqlState: err.sqlState,
+        sql: err.sql
+      }
+  });
+}
 });
 
 app.get('/getWH', auth, perm(1), async (req, res) => {
