@@ -293,59 +293,83 @@ app.post('/addUser', auth, perm(1),
 );
 
 
-app.delete('/deleteUser', auth, perm(1), async(req, res) => {
+app.delete('/deleteUser', auth, perm(1), async (req, res) => {
   const id = req.query.userID;
-  if(!id)
-  return res.status(400).json({message: "UserID giriniz => /deleteUser?userID=1"});
 
-  const [search] = await con.promise().query('select count(*) as cnt from user where userID=?',[id]);
-
-  if(search[0].cnt === 0)
-  return res.status(404).json({message: "Belirtilen UserID ile kayit bulunamadi."});
-
-  const query1 = `delete from userdata where userID = ?`;
-  const query2 = `delete from user where userID = ?`;
-  const connection = await con.promise().getConnection();
+  if (!id) {
+    return res
+      .status(400)
+      .json({ message: "UserID giriniz => /deleteUser?userID=1" });
+  }
 
   try {
-    await connection.beginTransaction();
-    const [res1] = await connection.promise().query(query1,[id]);
-    if(res1.affectedRows === 0)
-    {
-      await connection.rollback();
-      connection.release();
-      return res.status(400).json({message: "userdata silinirken hata olustu, islem geri alindi."});
+    const [search] = await con
+      .promise()
+      .query('SELECT COUNT(*) AS cnt FROM user WHERE userID = ?', [id]);
+
+    if (search[0].cnt === 0) {
+      return res
+        .status(404)
+        .json({ message: "Belirtilen UserID ile kayit bulunamadi." });
     }
 
-    const [res2] = await connection.promise().query(query2,[id]);
-    if(res2.affectedRows === 0)
-    {
-      await connection.rollback();
-      connection.release();
-      return res.status(400).json({message: "users silinirken hata olustu, islem geri alindi."});
-    }
-    await connection.commit();
-    connection.release();
-    return res.status(201).json({message: "Bilgiler basariyla silindi."});
-  }
-  catch (err) {
-    await connection.rollback();
-    connection.release();
+    const connection = await con.promise().getConnection();
 
-    console.error("SQL ERROR:", err);
+    try {
+      await connection.beginTransaction();
 
-    return res.status(500).json({
-      message: "Veritabanı hatası oluştu.",
-      sqlError: {
-        code: err.code,
-        errno: err.errno,
-        sqlMessage: err.sqlMessage,
-        sqlState: err.sqlState,
-        sql: err.sql
+      const [res1] = await connection.query(
+        'DELETE FROM userdata WHERE userID = ?',
+        [id]
+      );
+
+      if (res1.affectedRows === 0) {
+        await connection.rollback();
+        return res
+          .status(400)
+          .json({ message: "userdata silinirken hata olustu, islem geri alindi." });
       }
-  });
-}
+
+      const [res2] = await connection.query(
+        'DELETE FROM user WHERE userID = ?',
+        [id]
+      );
+
+      if (res2.affectedRows === 0) {
+        await connection.rollback();
+        return res
+          .status(400)
+          .json({ message: "user silinirken hata olustu, islem geri alindi." });
+      }
+
+      await connection.commit();
+      return res
+        .status(200)
+        .json({ message: "Bilgiler basariyla silindi." });
+
+    } catch (err) {
+      await connection.rollback();
+      console.error("SQL ERROR:", err);
+      return res.status(500).json({
+        message: "Veritabanı hatası oluştu.",
+        sqlError: {
+          code: err.code,
+          errno: err.errno,
+          sqlMessage: err.sqlMessage,
+          sqlState: err.sqlState,
+          sql: err.sql
+        }
+      });
+    } finally {
+      connection.release();
+    }
+
+  } catch (err) {
+    console.error("SQL ERROR:", err);
+    return res.status(500).json({ message: "Veritabanı hatası oluştu." });
+  }
 });
+
 
 app.get('/getWH', auth, perm(1), async (req, res) => {
   const id = req.query.id || '';
