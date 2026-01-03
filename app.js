@@ -326,29 +326,16 @@ app.post('/addUser', auth, perm(1), async (req, res) => {
       .status(400)
       .json({ message: "Kullanici Adi 50 karakterden buyuk olamaz" });
   }
+
   if (password.length < 8 || password.length > 64) {
     return res.status(400).json({
       message: "Sifre en az 8, en fazla 64 karakter olmalidir"
     });
   }
 
-  let hasUpperCase = false;
-  let hasNumber = false;
-  let hasSpecialChar = false;
-
-  const specialChars = "!@#$%^&*()_+-=[]{}|;:'\",.<>?/`~";
-
-  for (let i = 0; i < password.length; i++) {
-    const char = password[i];
-
-    if (char >= 'A' && char <= 'Z') {
-      hasUpperCase = true;
-    } else if (char >= '0' && char <= '9') {
-      hasNumber = true;
-    } else if (specialChars.includes(char)) {
-      hasSpecialChar = true;
-    }
-  }
+  const hasUpperCase = /[\p{Lu}]/u.test(password);
+  const hasNumber = /\d/.test(password);
+  const hasSpecialChar = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(password);
 
   if (!hasUpperCase) {
     return res.status(400).json({
