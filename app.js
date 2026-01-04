@@ -320,9 +320,9 @@ app.post('/addUser', auth, perm(1), async (req, res) => {
   ) {
     return res.status(400).json({ message: "Eksik alan girisi." });
   }
-  let uQuery = 'SELECT u.username FROM USER u WHERE u.username = ?';
+  let uQuery = 'SELECT u.username FROM user u WHERE u.username = ?';
   [usernameQuery] = await con.promise().query(uQuery, [username]);
-  
+
   if(usernameQuery.length > 0)
   {
     return res.status(400).json({ message: "Var olan Username giremezsiniz!"});
