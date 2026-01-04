@@ -320,6 +320,21 @@ app.post('/addUser', auth, perm(1), async (req, res) => {
   ) {
     return res.status(400).json({ message: "Eksik alan girisi." });
   }
+  let uQuery = 'SELECT u.username FROM USER u WHERE u.username = ?';
+  [usernameQuery] = await con.promise().query(uQuery, [username]);
+  
+  if(usernameQuery.length > 0)
+  {
+    return res.status(400).json({ message: "Var olan Username giremezsiniz!"});
+  }
+
+  uQuery = 'SELECT ud.email FROM userdata ud JOIN user u ON ud.userID = u.userID WHERE ud.email = ?'
+  const [emailQuery] = await con.promise().query(uQuery, [email]);
+  if(emailQuery.length > 0)
+  {
+    return res.status(400).json({ message: "Var olan email giremezsiniz!"});
+  }
+
 
   if (username.length > 50) {
     return res
