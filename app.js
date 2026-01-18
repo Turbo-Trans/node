@@ -105,7 +105,7 @@ app.post('/login', async (req, res) => {
         sessionToken
       },
       process.env.JWT_SECRET || "secretkey",
-      { expiresIn: "7d" }
+      { expiresIn: "30d" }
     );
 
     return res.status(200).json({
@@ -1135,6 +1135,135 @@ app.delete('/deleteProduct', auth, perm(1,2), async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Veritabani hatasi." });
+  }
+});
+
+app.post('/createOrder', auth, perm(1, 2), async (req, res) => {
+  const { receiverID, combinationID, productIDs } = req.body;
+
+  if (!receiverID || !combinationID || !productIDs || !Array.isArray(productIDs) || productIDs.length === 0) {
+    return res.status(400).json({ message: "Eksik veya hatali bilgi girisi. Urun listesi bos olamaz." });
+  }
+
+  const connection = await con.promise().getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [userCheck] = await connection.query(
+      'SELECT warehouseID FROM userdata WHERE userID = ?',
+      [req.user.userID]
+    );
+
+    if (!userCheck[0] || !userCheck[0].warehouseID) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Bir depoya atanmamissiniz, islem yapamazsiniz." });
+    }
+
+    const userWarehouseID = userCheck[0].warehouseID;
+
+    const [receiverCheck] = await connection.query(
+      'SELECT count(*) as cnt FROM receiver WHERE receiverID = ?',
+      [receiverID]
+    );
+
+    if (receiverCheck[0].cnt === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Alici bulunamadi." });
+    }
+
+    const [combCheck] = await connection.query(
+      'SELECT count(*) as cnt FROM combination WHERE combinationID = ?',
+      [combinationID]
+    );
+
+    if (combCheck[0].cnt === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Kombinasyon bulunamadi." });
+    }
+
+    const [validProducts] = await connection.query(`
+      SELECT 
+        p.productID, 
+        p.warehouse, 
+        p.statusID,
+        s.statusType 
+      FROM product p
+      LEFT JOIN status s ON p.statusID = s.statusID
+      WHERE p.productID IN (?) AND s.active = 1
+    `, [productIDs]);
+
+    if (validProducts.length !== productIDs.length) {
+      await connection.rollback();
+      return res.status(400).json({ message: "Bazi urunler bulunamadi veya aktif degil." });
+    }
+
+    for (const prod of validProducts) {
+      if (prod.warehouse !== userWarehouseID) {
+        await connection.rollback();
+        return res.status(403).json({ message: `Urun ID: ${prod.productID} sizin deponuzda degil.` });
+      }
+
+      if (prod.statusType !== 1) {
+        await connection.rollback();
+        return res.status(400).json({ message: `Urun ID: ${prod.productID} gonderilmeye uygun statusunde degil (StatusType: ${prod.statusType}).` });
+      }
+    }
+
+    // Format: #xyzab (Year|Month|Day|Hour|Minutes|Seconds|UserID)
+    const now = new Date();
+    const x = now.getFullYear();
+    const y = now.getMonth() + 1; 
+    const z = now.getDate();
+    const s = now.getSeconds();
+    const b = req.user.userID;
+    const m = now.getMinutes();
+    const h = now.getHours();
+    
+    const orderNumber = `#${x}-${y}-${z}-${h}-${m}-${s}-${b}`;
+
+    const [orderResult] = await connection.query(
+      'INSERT INTO orders (orderNumber, receiverID) VALUES (?, ?)',
+      [orderNumber, receiverID]
+    );
+    const newOrderID = orderResult.insertId;
+
+    for (const prod of validProducts) {
+      await connection.query(
+        'UPDATE status SET active = 0 WHERE statusID = ?',
+        [prod.statusID]
+      );
+
+      const [newStatusResult] = await connection.query(
+        'INSERT INTO status (statusType, statusDate, active) VALUES (2, NOW(), 1)'
+      );
+      const newStatusID = newStatusResult.insertId;
+
+      await connection.query(
+        'UPDATE product SET statusID = ?, orderID = ? WHERE productID = ?',
+        [newStatusID, newOrderID, prod.productID]
+      );
+    }
+
+    const [itineraryResult] = await connection.query(
+      'INSERT INTO itinerary (orderID, combinationID) VALUES (?, ?)',
+      [newOrderID, combinationID]
+    );
+
+    await connection.commit();
+    return res.status(201).json({
+      message: "Siparis ve yolculuk plani basariyla olusturuldu.",
+      orderID: newOrderID,
+      orderNumber: orderNumber,
+      itineraryID: itineraryResult.insertId
+    });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error(err);
+    return res.status(500).json({ message: "Veritabani hatasi." });
+  } finally {
+    connection.release();
   }
 });
 
