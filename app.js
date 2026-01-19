@@ -1138,6 +1138,39 @@ app.delete('/deleteProduct', auth, perm(1,2), async (req, res) => {
   }
 });
 
+app.get('/listProductShapes', auth, perm(1, 2), async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const offset = (page - 1) * limit;
+
+    const countQuery = `SELECT COUNT(*) as total FROM productshape`;
+    const [countResult] = await con.promise().query(countQuery);
+    const total = countResult[0].total;
+
+    const dataQuery = `
+      SELECT * FROM productshape 
+      ORDER BY shapeID ASC 
+      LIMIT ? OFFSET ?
+    `;
+    
+    const [rows] = await con.promise().query(dataQuery, [limit, offset]);
+
+    res.status(200).json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: rows
+    });
+
+  } catch (err) {
+    console.error("List ProductShapes Error:", err);
+    return res.status(500).json({ error: "Veritabanı hatası." });
+  }
+});
+
 app.post('/createOrder', auth, perm(1, 2), async (req, res) => {
   const { 
     receiverID, 
