@@ -421,6 +421,250 @@
         ],
         "500": { "error": "Veritabani hatasi." }
       }
+    },
+    {
+      "name": "Create Order",
+      "method": "POST",
+      "url": "/createOrder",
+      "permission": [1, 2],
+      "description": "Creates a new order, combination, and itinerary. Validates that products exist, are in the user's warehouse, and have statusType=1.",
+      "body": {
+        "receiverID": "number (required)",
+        "productIDs": "array of numbers (required, e.g., [1, 2, 3])",
+        "truckInfoID": "number (required)",
+        "trailerID": "number (required)",
+        "kingPinOffset": "number (optional, default: 0)",
+        "kingPinLimit": "number (optional, default: 0)"
+      },
+      "responses": {
+        "201": {
+          "message": "Sipariş, Kombinasyon ve Yolculuk planı başarıyla oluşturuldu.",
+          "orderID": "number",
+          "orderNumber": "string",
+          "combinationID": "number",
+          "itineraryID": "number"
+        },
+        "400": { "message": "Eksik bilgi / Ürün statüsü uygun değil." },
+        "403": { "message": "Depo ataması yok veya ürün sizin deponuzda değil." },
+        "404": { "message": "Alıcı, Araç veya Dorse bulunamadı." },
+        "500": { "message": "Veritabanı hatası." }
+      }
+    },
+    {
+      "name": "List Orders",
+      "method": "GET",
+      "url": "/listOrders",
+      "permission": [1, 2],
+      "description": "Lists orders filtered by the user's warehouse. Supports pagination and searching.",
+      "query": {
+        "page": "number (default: 1)",
+        "limit": "number (default: 10)",
+        "orderNumber": "string (Partial Match)",
+        "receiverName": "string (Partial Match)",
+        "active": "number (0 or 1)"
+      },
+      "responses": {
+        "200": {
+          "success": true,
+          "page": 1,
+          "limit": 10,
+          "total": 50,
+          "totalPages": 5,
+          "data": [
+            {
+              "orderID": "number",
+              "orderNumber": "string",
+              "receiverName": "string",
+              "receiverAddress": "string",
+              "receiverCity": "string",
+              "receiverCountry": "string",
+              "productCount": "number",
+              "itineraryActive": "number (1 or 0)"
+            }
+          ]
+        },
+        "403": { "message": "Bir depoya atanmamışsınız." },
+        "500": { "message": "Veritabanı hatası oluştu." }
+      }
+    },
+    {
+      "name": "Get Order Details",
+      "method": "GET",
+      "url": "/orderDetails",
+      "permission": [1, 2],
+      "description": "Returns detailed information about a specific order, including receiver, truck, trailer, and combination info.",
+      "query": {
+        "orderID": "number (required)"
+      },
+      "responses": {
+        "200": {
+          "orderInfo": { "orderID": "number", "orderNumber": "string" },
+          "receiverInfo": { "name": "string", "address": "string", "city": "string", "country": "string" },
+          "itineraryInfo": { "itineraryID": "number", "active": "boolean" },
+          "combinationInfo": {
+            "combinationID": "number",
+            "kingPinOffset": "number",
+            "kingPinLimit": "number",
+            "truck": { "plate": "string", "brand": "string", "model": "string" },
+            "trailer": {
+              "dimensions": { "x": "number", "y": "number", "z": "number" },
+              "weightLimit": "number",
+              "axisDistance": "number"
+            }
+          }
+        },
+        "400": { "message": "OrderID giriniz." },
+        "403": { "message": "Bu siparişe erişim izniniz yok." },
+        "404": { "message": "Sipariş detayları bulunamadı." },
+        "500": { "message": "Veritabanı hatası." }
+      }
+    },
+    {
+      "name": "Delete (Cancel) Order",
+      "method": "DELETE",
+      "url": "/deleteOrder",
+      "permission": [1, 2],
+      "description": "Soft deletes an order by setting the itinerary active status to 0.",
+      "query": {
+        "orderID": "number (required)"
+      },
+      "responses": {
+        "200": { "message": "Sipariş başarıyla iptal edildi (Itinerary pasife alındı)." },
+        "400": { "message": "OrderID giriniz." },
+        "403": { "message": "Yetkisiz işlem." },
+        "404": { "message": "Aktif yolculuk kaydı bulunamadı." },
+        "500": { "message": "Veritabanı hatası." }
+      }
+    },
+    {
+      "name": "Add Trailer",
+      "method": "POST",
+      "url": "/addTrailer",
+      "permission": [1],
+      "body": {
+        "dimensionX": "number (required)",
+        "dimensionY": "number (required)",
+        "dimensionZ": "number (required)",
+        "wlimit": "number (required)",
+        "axis_d": "number (optional)",
+        "wlimitBack": "number (optional)",
+        "wlimitFront": "number (optional)"
+      },
+      "responses": {
+        "201": { "message": "Dorse başarıyla eklendi.", "id": "number" },
+        "400": { "message": "Boyutlar ve ağırlık limiti zorunludur." },
+        "500": { "error": "Veritabanı hatası." }
+      }
+    },
+    {
+      "name": "Delete Trailer",
+      "method": "DELETE",
+      "url": "/removeTrailer",
+      "permission": [1],
+      "query": {
+        "id": "number (required)"
+      },
+      "responses": {
+        "200": { "message": "Dorse başarıyla silindi." },
+        "400": { "message": "Bu dorse kullanımda olduğu için silinemez." },
+        "404": { "message": "Belirtilen ID ile dorse bulunamadı." },
+        "500": { "error": "Veritabanı hatası." }
+      }
+    },
+    {
+      "name": "List Trailers",
+      "method": "GET",
+      "url": "/listTrailers",
+      "permission": [1, 2],
+      "query": {
+        "page": "number (default: 1)",
+        "limit": "number (default: 10)"
+      },
+      "responses": {
+        "200": {
+          "success": true,
+          "page": 1,
+          "limit": 10,
+          "total": "number",
+          "totalPages": "number",
+          "data": [
+            {
+              "trailerID": "number",
+              "dimensionX": "number",
+              "dimensionY": "number",
+              "dimensionZ": "number",
+              "wlimit": "number"
+            }
+          ]
+        },
+        "500": { "error": "Veritabanı hatası." }
+      }
+    },
+    {
+      "name": "Create Receiver",
+      "method": "POST",
+      "url": "/createReceiver",
+      "permission": [1, 2],
+      "body": {
+        "receiverName": "string (required)",
+        "receiverCityID": "number (required)",
+        "receiverAddress": "string (required)"
+      },
+      "responses": {
+        "201": { "message": "Alıcı başarıyla oluşturuldu.", "receiverID": "number" },
+        "400": { "message": "Eksik bilgi." },
+        "404": { "message": "Geçersiz Şehir ID." },
+        "500": { "error": "Veritabanı hatası." }
+      }
+    },
+    {
+      "name": "Delete Receiver",
+      "method": "DELETE",
+      "url": "/removeReceiver",
+      "permission": [1],
+      "query": {
+        "id": "number (required)"
+      },
+      "responses": {
+        "200": { "message": "Alıcı başarıyla silindi." },
+        "400": { "message": "Bu alıcıya ait siparişler var, silinemez." },
+        "404": { "message": "Alıcı bulunamadı." },
+        "500": { "error": "Veritabanı hatası." }
+      }
+    },
+    {
+      "name": "List Receivers",
+      "method": "GET",
+      "url": "/listReceivers",
+      "permission": [1, 2],
+      "query": {
+        "page": "number (default: 1)",
+        "limit": "number (default: 10)",
+        "name": "string (Partial Match)",
+        "city": "string (Partial Match)",
+        "country": "string (Partial Match)"
+      },
+      "responses": {
+        "200": {
+          "success": true,
+          "page": 1,
+          "limit": 10,
+          "total": "number",
+          "totalPages": "number",
+          "data": [
+            {
+              "receiverID": "number",
+              "receiverName": "string",
+              "receiverAddress": "string",
+              "cityID": "number",
+              "cityName": "string",
+              "countryID": "number",
+              "countryName": "string"
+            }
+          ]
+        },
+        "500": { "error": "Veritabanı hatası." }
+      }
     }
   ]
 }

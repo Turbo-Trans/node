@@ -1139,10 +1139,24 @@ app.delete('/deleteProduct', auth, perm(1,2), async (req, res) => {
 });
 
 app.post('/createOrder', auth, perm(1, 2), async (req, res) => {
-  const { receiverID, combinationID, productIDs } = req.body;
+  const { 
+    receiverID, 
+    productIDs, 
+    truckInfoID, 
+    trailerID, 
+    kingPinOffset, 
+    kingPinLimit 
+  } = req.body;
 
-  if (!receiverID || !combinationID || !productIDs || !Array.isArray(productIDs) || productIDs.length === 0) {
-    return res.status(400).json({ message: "Eksik veya hatali bilgi girisi. Urun listesi bos olamaz." });
+  if (
+    !receiverID || 
+    !truckInfoID || 
+    !trailerID || 
+    !productIDs || 
+    !Array.isArray(productIDs) || 
+    productIDs.length === 0
+  ) {
+    return res.status(400).json({ message: "Eksik bilgi: Alıcı, Araç (TruckInfo), Dorse (Trailer) ve Ürün listesi zorunludur." });
   }
 
   const connection = await con.promise().getConnection();
@@ -1157,7 +1171,7 @@ app.post('/createOrder', auth, perm(1, 2), async (req, res) => {
 
     if (!userCheck[0] || !userCheck[0].warehouseID) {
       await connection.rollback();
-      return res.status(403).json({ message: "Bir depoya atanmamissiniz, islem yapamazsiniz." });
+      return res.status(403).json({ message: "Bir depoya atanmamışsınız, işlem yapamazsınız." });
     }
 
     const userWarehouseID = userCheck[0].warehouseID;
@@ -1169,17 +1183,27 @@ app.post('/createOrder', auth, perm(1, 2), async (req, res) => {
 
     if (receiverCheck[0].cnt === 0) {
       await connection.rollback();
-      return res.status(404).json({ message: "Alici bulunamadi." });
+      return res.status(404).json({ message: "Alıcı bulunamadı." });
     }
 
-    const [combCheck] = await connection.query(
-      'SELECT count(*) as cnt FROM combination WHERE combinationID = ?',
-      [combinationID]
+    const [truckCheck] = await connection.query(
+      'SELECT count(*) as cnt FROM truckinfo WHERE truckInfoID = ?',
+      [truckInfoID]
     );
 
-    if (combCheck[0].cnt === 0) {
+    if (truckCheck[0].cnt === 0) {
       await connection.rollback();
-      return res.status(404).json({ message: "Kombinasyon bulunamadi." });
+      return res.status(404).json({ message: "Belirtilen Araç (TruckInfo) bulunamadı." });
+    }
+
+    const [trailerCheck] = await connection.query(
+      'SELECT count(*) as cnt FROM trailer WHERE trailerID = ?',
+      [trailerID]
+    );
+
+    if (trailerCheck[0].cnt === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Belirtilen Dorse (Trailer) bulunamadı." });
     }
 
     const [validProducts] = await connection.query(`
@@ -1195,20 +1219,26 @@ app.post('/createOrder', auth, perm(1, 2), async (req, res) => {
 
     if (validProducts.length !== productIDs.length) {
       await connection.rollback();
-      return res.status(400).json({ message: "Bazi urunler bulunamadi veya aktif degil." });
+      return res.status(400).json({ message: "Bazı ürünler bulunamadı veya aktif değil." });
     }
 
     for (const prod of validProducts) {
       if (prod.warehouse !== userWarehouseID) {
         await connection.rollback();
-        return res.status(403).json({ message: `Urun ID: ${prod.productID} sizin deponuzda degil.` });
+        return res.status(403).json({ message: `Ürün ID: ${prod.productID} sizin deponuzda değil.` });
       }
 
       if (prod.statusType !== 1) {
         await connection.rollback();
-        return res.status(400).json({ message: `Urun ID: ${prod.productID} gonderilmeye uygun statusunde degil (StatusType: ${prod.statusType}).` });
+        return res.status(400).json({ message: `Ürün ID: ${prod.productID} gönderilmeye uygun statüsünde değil (StatusType: ${prod.statusType}).` });
       }
     }
+
+    const [combResult] = await connection.query(
+      'INSERT INTO combination (truckInfoID, trailerID, kingpinoffset, kingpinlimit) VALUES (?, ?, ?, ?)',
+      [truckInfoID, trailerID, kingPinOffset || 0, kingPinLimit || 0]
+    );
+    const newCombinationID = combResult.insertId;
 
     // Format: #xyzab (Year|Month|Day|Hour|Minutes|Seconds|UserID)
     const now = new Date();
@@ -1246,29 +1276,513 @@ app.post('/createOrder', auth, perm(1, 2), async (req, res) => {
     }
 
     const [itineraryResult] = await connection.query(
-      'INSERT INTO itinerary (orderID, combinationID) VALUES (?, ?)',
-      [newOrderID, combinationID]
+      'INSERT INTO itinerary (orderID, combinationID, active) VALUES (?, ?, 1)',
+      [newOrderID, newCombinationID]
     );
 
     await connection.commit();
     return res.status(201).json({
-      message: "Siparis ve yolculuk plani basariyla olusturuldu.",
+      message: "Sipariş, Kombinasyon ve Yolculuk planı başarıyla oluşturuldu.",
       orderID: newOrderID,
       orderNumber: orderNumber,
+      combinationID: newCombinationID,
       itineraryID: itineraryResult.insertId
     });
 
   } catch (err) {
     await connection.rollback();
     console.error(err);
-    return res.status(500).json({ message: "Veritabani hatasi." });
+    return res.status(500).json({ message: "Veritabanı hatası." });
   } finally {
     connection.release();
   }
 });
 
+app.get('/listOrders', auth, perm(1, 2), async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const offset = (page - 1) * limit;
+
+    const {
+      orderNumber,
+      receiverName,
+      active
+    } = req.query;
+
+    const userID = req.user.userID;
+    const [userCheck] = await con.promise().query(
+      'SELECT warehouseID FROM userdata WHERE userID = ?', 
+      [userID]
+    );
+
+    const warehouseID = userCheck[0]?.warehouseID;
+
+    if (!warehouseID) {
+      return res.status(403).json({ message: 'Bir depoya atanmamışsınız, siparişleri görüntüleyemezsiniz.' });
+    }
+
+    let whereConditions = ['p.warehouse = ?'];
+    let params = [warehouseID];
+
+    if (orderNumber) {
+      whereConditions.push('o.orderNumber LIKE ?');
+      params.push(`%${orderNumber}%`);
+    }
+
+    if (receiverName) {
+      whereConditions.push('r.receiverName LIKE ?');
+      params.push(`%${receiverName}%`);
+    }
+
+    if (active !== undefined) {
+      whereConditions.push('i.active = ?');
+      params.push(active);
+    }
+
+    const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+
+    const countQuery = `
+      SELECT COUNT(DISTINCT o.orderID) as total
+      FROM orders o
+      JOIN product p ON o.orderID = p.orderID
+      LEFT JOIN receiver r ON o.receiverID = r.receiverID
+      LEFT JOIN itinerary i ON o.orderID = i.orderID
+      ${whereClause}
+    `;
+
+    const [[{ total }]] = await con.promise().query(countQuery, params);
+
+    const dataQuery = `
+      SELECT 
+        o.orderID,
+        o.orderNumber,
+        r.receiverName,
+        r.receiverAddress,
+        c.cityName as receiverCity,
+        co.countryName as receiverCountry,
+        COUNT(DISTINCT p.productID) as productCount,
+        i.active as itineraryActive
+      FROM orders o
+      JOIN product p ON o.orderID = p.orderID
+      LEFT JOIN receiver r ON o.receiverID = r.receiverID
+      LEFT JOIN cities c ON r.receiverCityID = c.cityID
+      LEFT JOIN countries co ON c.countryID = co.countryID
+      LEFT JOIN itinerary i ON o.orderID = i.orderID
+      ${whereClause}
+      GROUP BY o.orderID, i.active
+      ORDER BY o.orderID DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const [rows] = await con.promise().query(dataQuery, [...params, limit, offset]);
+
+    res.status(200).json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: rows
+    });
+
+  } catch (err) {
+    console.error("List Orders Error:", err);
+    res.status(500).json({ message: 'Veritabanı hatası oluştu.' });
+  }
+});
 
 
+app.get('/orderDetails', auth, perm(1, 2), async (req, res) => {
+  const { orderID } = req.query;
+
+  if (!orderID) {
+    return res.status(400).json({ message: "OrderID giriniz => /orderDetails?orderID=..." });
+  }
+
+  try {
+    const [userCheck] = await con.promise().query(
+      'SELECT warehouseID FROM userdata WHERE userID = ?',
+      [req.user.userID]
+    );
+    const warehouseID = userCheck[0]?.warehouseID;
+
+    if (!warehouseID) {
+      return res.status(403).json({ message: 'Bir depoya atanmamışsınız.' });
+    }
+
+    const [permCheck] = await con.promise().query(
+      'SELECT 1 FROM product WHERE orderID = ? AND warehouse = ? LIMIT 1',
+      [orderID, warehouseID]
+    );
+
+    if (permCheck.length === 0) {
+      return res.status(403).json({ message: "Bu siparişe erişim izniniz yok veya sipariş bulunamadı." });
+    }
+
+    const queryDetails = `
+      SELECT 
+        o.orderID, o.orderNumber,
+        r.receiverName, r.receiverAddress, 
+        c.cityName as receiverCity, co.countryName as receiverCountry,
+        i.itineraryID, i.active as itineraryActive,
+        comb.combinationID, comb.kingpinoffset, comb.kingpinlimit,
+        ti.plate, 
+        t.truckBrand, t.truckModel,
+        tr.dimensionX as trailerDimX, tr.dimensionY as trailerDimY, tr.dimensionZ as trailerDimZ,
+        tr.wlimit as trailerWLimit, tr.axis_d
+      FROM orders o
+      LEFT JOIN receiver r ON o.receiverID = r.receiverID
+      LEFT JOIN cities c ON r.receiverCityID = c.cityID
+      LEFT JOIN countries co ON c.countryID = co.countryID
+      LEFT JOIN itinerary i ON o.orderID = i.orderID
+      LEFT JOIN combination comb ON i.combinationID = comb.combinationID
+      LEFT JOIN truckinfo ti ON comb.truckInfoID = ti.truckInfoID
+      LEFT JOIN trucks t ON ti.truckID = t.truckID
+      LEFT JOIN trailer tr ON comb.trailerID = tr.trailerID
+      WHERE o.orderID = ?
+    `;
+
+    const [details] = await con.promise().query(queryDetails, [orderID]);
+
+    if (details.length === 0) {
+      return res.status(404).json({ message: "Sipariş detayları bulunamadı." });
+    }
+
+    const d = details[0];
+
+    const responseData = {
+      orderInfo: {
+        orderID: d.orderID,
+        orderNumber: d.orderNumber
+      },
+      receiverInfo: {
+        name: d.receiverName,
+        address: d.receiverAddress,
+        city: d.receiverCity,
+        country: d.receiverCountry
+      },
+      itineraryInfo: {
+        itineraryID: d.itineraryID,
+        active: d.itineraryActive === 1
+      },
+      combinationInfo: {
+        combinationID: d.combinationID,
+        kingPinOffset: d.kingpinoffset,
+        kingPinLimit: d.kingpinlimit,
+        truck: {
+          plate: d.plate,
+          brand: d.truckBrand,
+          model: d.truckModel
+        },
+        trailer: {
+          dimensions: {
+            x: d.trailerDimX,
+            y: d.trailerDimY,
+            z: d.trailerDimZ
+          },
+          weightLimit: d.trailerWLimit,
+          axisDistance: d.axis_d
+        }
+      }
+    };
+
+    return res.status(200).json(responseData);
+
+  } catch (err) {
+    console.error("Order Details Error:", err);
+    return res.status(500).json({ message: "Veritabanı hatası oluştu." });
+  }
+});
+
+app.delete('/deleteOrder', auth, perm(1, 2), async (req, res) => {
+  const { orderID } = req.query;
+
+  if (!orderID) {
+    return res.status(400).json({ message: "OrderID giriniz => /deleteOrder?orderID=..." });
+  }
+
+  try {
+    const connection = await con.promise().getConnection();
+    await connection.beginTransaction();
+
+    const [userCheck] = await connection.query(
+      'SELECT warehouseID FROM userdata WHERE userID = ?',
+      [req.user.userID]
+    );
+    const warehouseID = userCheck[0]?.warehouseID;
+
+    if (!warehouseID) {
+      await connection.rollback();
+      connection.release();
+      return res.status(403).json({ message: 'Bir depoya atanmamışsınız.' });
+    }
+
+    const [permCheck] = await connection.query(
+      'SELECT 1 FROM product WHERE orderID = ? AND warehouse = ? LIMIT 1',
+      [orderID, warehouseID]
+    );
+
+    if (permCheck.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(403).json({ message: "Bu siparişi silme yetkiniz yok veya sipariş bulunamadı." });
+    }
+
+    const [result] = await connection.query(
+      'UPDATE itinerary SET active = 0 WHERE orderID = ?',
+      [orderID]
+    );
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ message: "Sipariş için aktif bir yolculuk kaydı bulunamadı." });
+    }
+
+    await connection.commit();
+    connection.release();
+
+    return res.status(200).json({ message: "Sipariş başarıyla iptal edildi (Itinerary pasife alındı)." });
+
+  } catch (err) {
+    console.error("Delete Order Error:", err);
+    return res.status(500).json({ message: "Veritabanı hatası oluştu." });
+  }
+});
+
+
+app.post('/addTrailer', auth, perm(1), async (req, res) => {
+  const { 
+    dimensionX, 
+    dimensionY, 
+    dimensionZ, 
+    axis_d, 
+    wlimitBack, 
+    wlimitFront, 
+    wlimit 
+  } = req.body;
+
+  if (!dimensionX || !dimensionY || !dimensionZ || !wlimit) {
+    return res.status(400).json({ message: "Boyutlar (X, Y, Z) ve ağırlık limiti (wlimit) zorunludur." });
+  }
+
+  const query = `
+    INSERT INTO trailer 
+    (dimensionX, dimensionY, dimensionZ, axis_d, wlimitBack, wlimitFront, wlimit) 
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  try {
+    const [result] = await con.promise().query(query, [
+      dimensionX, 
+      dimensionY, 
+      dimensionZ, 
+      axis_d || 0, 
+      wlimitBack || 0, 
+      wlimitFront || 0, 
+      wlimit
+    ]);
+    return res.status(201).json({ message: "Dorse başarıyla eklendi.", id: result.insertId });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Veritabanı hatası." });
+  }
+});
+
+app.delete('/removeTrailer', auth, perm(1), async (req, res) => {
+  const id = req.query.id;
+
+  if (!id) {
+    return res.status(400).json({ message: "ID giriniz => /removeTrailer?id=1" });
+  }
+
+  try {
+    const [search] = await con.promise().query('SELECT count(*) as cnt FROM trailer WHERE trailerID = ?', [id]);
+
+    if (search[0].cnt === 0) {
+      return res.status(404).json({ message: "Belirtilen ID ile dorse bulunamadı." });
+    }
+
+    const query = `DELETE FROM trailer WHERE trailerID = ?`;
+    await con.promise().query(query, [id]);
+    
+    return res.status(200).json({ message: "Dorse başarıyla silindi." });
+
+  } catch (err) {
+    console.error(err);
+    if (err.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(400).json({ message: "Bu dorse bir kombinasyonda (Combination) kullanıldığı için silinemez." });
+    }
+    return res.status(500).json({ error: "Veritabanı hatası." });
+  }
+});
+
+app.get('/listTrailers', auth, perm(1, 2), async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const offset = (page - 1) * limit;
+
+    const countQuery = `SELECT COUNT(*) as total FROM trailer`;
+    const [countResult] = await con.promise().query(countQuery);
+    const total = countResult[0].total;
+
+    const dataQuery = `SELECT * FROM trailer ORDER BY trailerID DESC LIMIT ? OFFSET ?`;
+    const [rows] = await con.promise().query(dataQuery, [limit, offset]);
+
+    res.status(200).json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: rows
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Veritabanı hatası." });
+  }
+});
+
+
+app.post('/createReceiver', auth, perm(1, 2), async (req, res) => {
+  const { receiverName, receiverCityID, receiverAddress } = req.body;
+
+  if (!receiverName || !receiverCityID || !receiverAddress) {
+    return res.status(400).json({ message: "Alıcı adı, Şehir ID ve Adres zorunludur." });
+  }
+
+  try {
+    const [cityCheck] = await con.promise().query('SELECT 1 FROM cities WHERE cityID = ?', [receiverCityID]);
+    if (cityCheck.length === 0) {
+      return res.status(404).json({ message: "Geçersiz Şehir ID." });
+    }
+
+    const query = `
+      INSERT INTO receiver (receiverName, receiverCityID, receiverAddress) 
+      VALUES (?, ?, ?)
+    `;
+
+    const [result] = await con.promise().query(query, [receiverName, receiverCityID, receiverAddress]);
+    
+    return res.status(201).json({ 
+      message: "Alıcı başarıyla oluşturuldu.", 
+      receiverID: result.insertId 
+    });
+
+  } catch (err) {
+    console.error("Create Receiver Error:", err);
+    return res.status(500).json({ error: "Veritabanı hatası." });
+  }
+});
+
+app.delete('/removeReceiver', auth, perm(1), async (req, res) => {
+  const id = req.query.id;
+
+  if (!id) {
+    return res.status(400).json({ message: "ID giriniz => /removeReceiver?id=1" });
+  }
+
+  try {
+    const [search] = await con.promise().query('SELECT count(*) as cnt FROM receiver WHERE receiverID = ?', [id]);
+
+    if (search[0].cnt === 0) {
+      return res.status(404).json({ message: "Alıcı bulunamadı." });
+    }
+
+    const query = `DELETE FROM receiver WHERE receiverID = ?`;
+    await con.promise().query(query, [id]);
+
+    return res.status(200).json({ message: "Alıcı başarıyla silindi." });
+
+  } catch (err) {
+    console.error("Remove Receiver Error:", err);
+    
+    if (err.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(400).json({ message: "Bu alıcıya ait sipariş kayıtları bulunduğu için silinemez." });
+    }
+    
+    return res.status(500).json({ error: "Veritabanı hatası." });
+  }
+});
+
+
+app.get('/listReceivers', auth, perm(1, 2), async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const offset = (page - 1) * limit;
+
+    const { name, city, country } = req.query;
+
+    let whereConditions = [];
+    let params = [];
+
+    if (name) {
+      whereConditions.push("r.receiverName LIKE ?");
+      params.push(`%${name}%`);
+    }
+
+    if (city) {
+      whereConditions.push("c.cityName LIKE ?");
+      params.push(`%${city}%`);
+    }
+
+    if (country) {
+      whereConditions.push("co.countryName LIKE ?");
+      params.push(`%${country}%`);
+    }
+
+    let whereClause = "";
+    if (whereConditions.length > 0) {
+      whereClause = " WHERE " + whereConditions.join(" AND ");
+    }
+
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM receiver r
+      LEFT JOIN cities c ON r.receiverCityID = c.cityID
+      LEFT JOIN countries co ON c.countryID = co.countryID
+      ${whereClause}
+    `;
+    
+    const [[{ total }]] = await con.promise().query(countQuery, params);
+
+    const dataQuery = `
+      SELECT 
+        r.receiverID, 
+        r.receiverName, 
+        r.receiverAddress, 
+        c.cityID,
+        c.cityName, 
+        co.countryID,
+        co.countryName
+      FROM receiver r
+      LEFT JOIN cities c ON r.receiverCityID = c.cityID
+      LEFT JOIN countries co ON c.countryID = co.countryID
+      ${whereClause}
+      ORDER BY r.receiverID DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const [rows] = await con.promise().query(dataQuery, [...params, limit, offset]);
+
+    res.status(200).json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: rows
+    });
+
+  } catch (err) {
+    console.error("List Receivers Error:", err);
+    return res.status(500).json({ error: "Veritabanı hatası." });
+  }
+});
 
 app.use((req, res) => {
   res.status(404).json({message: "Bu API bulunmuyor."})
