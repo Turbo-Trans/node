@@ -956,8 +956,10 @@ app.post('/addProduct', auth, perm(1, 2), async (req, res) => {
     return res.status(400).json({ message: "Eksik alan girisi." });
   }
 
+  let connection;
+
   try {
-    const connection = await con.promise().getConnection();
+    connection = await con.promise().getConnection();
     await connection.beginTransaction();
 
     const [userWH] = await connection.query(
@@ -996,16 +998,17 @@ app.post('/addProduct', auth, perm(1, 2), async (req, res) => {
     ]);
 
     await connection.commit();
-    connection.release();
-
     return res.status(201).json({
       message: "Urun basariyla eklendi.",
       productID: productResult.insertId
     });
 
   } catch (err) {
+    if (connection) await connection.rollback();
     console.error(err);
     return res.status(500).json({ message: "Veritabani hatasi." });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -1091,19 +1094,21 @@ app.put('/editProduct', auth, perm(1, 2), async (req, res) => {
 });
 
 
-app.delete('/deleteProduct', auth, perm(1,2), async (req, res) => {
+app.delete('/deleteProduct', auth, perm(1, 2), async (req, res) => {
   const id = req.query.id;
 
   if (!id) {
     return res.status(400).json({ message: "ID giriniz => /deleteProduct?id=1" });
   }
 
+  let connection;
+
   try {
-    const connection = await con.promise().getConnection();
+    connection = await con.promise().getConnection();
     await connection.beginTransaction();
 
     const [search] = await connection.query(
-      'SELECT productID, statusID FROM product WHERE productID = ?',
+      'SELECT productID, statusID FROM product WHERE productID = ? FOR UPDATE',
       [id]
     );
 
@@ -1127,13 +1132,14 @@ app.delete('/deleteProduct', auth, perm(1,2), async (req, res) => {
     }
 
     await connection.commit();
-    connection.release();
-
     return res.status(200).json({ message: "Urun basariyla silindi." });
 
   } catch (err) {
+    if (connection) await connection.rollback();
     console.error(err);
     return res.status(500).json({ message: "Veritabani hatasi." });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -1534,8 +1540,10 @@ app.delete('/deleteOrder', auth, perm(1, 2), async (req, res) => {
     return res.status(400).json({ message: "OrderID giriniz => /deleteOrder?orderID=..." });
   }
 
+  let connection;
+
   try {
-    const connection = await con.promise().getConnection();
+    connection = await con.promise().getConnection();
     await connection.beginTransaction();
 
     const [userCheck] = await connection.query(
@@ -1546,7 +1554,6 @@ app.delete('/deleteOrder', auth, perm(1, 2), async (req, res) => {
 
     if (!warehouseID) {
       await connection.rollback();
-      connection.release();
       return res.status(403).json({ message: 'Bir depoya atanmamışsınız.' });
     }
 
@@ -1557,7 +1564,6 @@ app.delete('/deleteOrder', auth, perm(1, 2), async (req, res) => {
 
     if (permCheck.length === 0) {
       await connection.rollback();
-      connection.release();
       return res.status(403).json({ message: "Bu siparişi silme yetkiniz yok veya sipariş bulunamadı." });
     }
 
@@ -1568,18 +1574,18 @@ app.delete('/deleteOrder', auth, perm(1, 2), async (req, res) => {
 
     if (result.affectedRows === 0) {
       await connection.rollback();
-      connection.release();
       return res.status(404).json({ message: "Sipariş için aktif bir yolculuk kaydı bulunamadı." });
     }
 
     await connection.commit();
-    connection.release();
-
     return res.status(200).json({ message: "Sipariş başarıyla iptal edildi (Itinerary pasife alındı)." });
 
   } catch (err) {
+    if (connection) await connection.rollback();
     console.error("Delete Order Error:", err);
     return res.status(500).json({ message: "Veritabanı hatası oluştu." });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
