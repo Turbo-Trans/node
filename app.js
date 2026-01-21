@@ -1011,47 +1011,43 @@ app.post('/addProduct', auth, perm(1, 2), async (req, res) => {
 
 app.put('/editProduct', auth, perm(1, 2), async (req, res) => {
   const id = req.query.id;
-  const {
-    productShape,
-    sender,
-    isBreakable,
-    weight,
-    dimensionX,
-    dimensionY,
-    dimensionZ,
-    statusID
-  } = req.body;
-
   if (!id) {
     return res.status(400).json({ message: "ID giriniz => /editProduct?id=1" });
   }
 
+  let connection;
+
   try {
-    const connection = await con.promise().getConnection();
+    const [userWH] = await con.promise().query(
+      'SELECT warehouseID FROM userdata WHERE userID = ?',
+      [req.user.userID]
+    );
+
+    connection = await con.promise().getConnection();
     await connection.beginTransaction();
 
     const [search] = await connection.query(
-      'SELECT warehouse, statusID FROM product WHERE productID = ?',
+      `SELECT warehouse, statusID 
+       FROM product 
+       WHERE productID = ? 
+       FOR UPDATE`,
       [id]
     );
 
     if (!search[0]) {
       await connection.rollback();
+      connection.release();
       return res.status(404).json({ message: "Urun bulunamadi." });
     }
 
-    const [userWH] = await connection.query(
-      'SELECT warehouseID FROM userdata WHERE userID = ?',
-      [req.user.userID]
-    );
-
     if (search[0].warehouse !== userWH[0]?.warehouseID) {
       await connection.rollback();
+      connection.release();
       return res.status(403).json({ message: "Bu urunu guncelleyemezsin." });
     }
 
-    const updateProductQuery = `
-      UPDATE product SET
+    await connection.query(
+      `UPDATE product SET
         productShape = ?,
         sender = ?,
         isBreakable = ?,
@@ -1059,25 +1055,23 @@ app.put('/editProduct', auth, perm(1, 2), async (req, res) => {
         dimensionX = ?,
         dimensionY = ?,
         dimensionZ = ?
-      WHERE productID = ?
-    `;
-
-    await connection.query(updateProductQuery, [
-      productShape,
-      sender,
-      isBreakable,
-      weight,
-      dimensionX,
-      dimensionY,
-      dimensionZ,
-      id
-    ]);
+       WHERE productID = ?`,
+      [
+        productShape,
+        sender,
+        isBreakable,
+        weight,
+        dimensionX,
+        dimensionY,
+        dimensionZ,
+        id
+      ]
+    );
 
     if (statusID) {
-      const currentStatusRowID = search[0].statusID;
       await connection.query(
         'UPDATE status SET statusType = ?, statusDate = NOW() WHERE statusID = ?',
-        [statusID, currentStatusRowID]
+        [statusID, search[0].statusID]
       );
     }
 
@@ -1087,10 +1081,15 @@ app.put('/editProduct', auth, perm(1, 2), async (req, res) => {
     return res.status(200).json({ message: "Urun guncellendi." });
 
   } catch (err) {
+    if (connection) {
+      await connection.rollback();
+      connection.release();
+    }
     console.error(err);
     return res.status(500).json({ message: "Veritabani hatasi." });
   }
 });
+
 
 app.delete('/deleteProduct', auth, perm(1,2), async (req, res) => {
   const id = req.query.id;
