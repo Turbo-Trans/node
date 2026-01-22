@@ -24,12 +24,14 @@ const transporter = nodemailer.createTransport({
 async function sendmail(email,text){
   const info = await transporter.sendMail({
     from: '"Lasttik.com - Turbo Trans" <ttrans25@gmail.com>',
-    to: "ridvannaguss51@gmail.com",
+    to: email,
     subject: "Your OTP",
-    text: "", 
-    html: "<b>${text}</b>", 
+    text: text, 
+    html: `<b>${escape(text)}</b>`,
   });
 };
+
+
 
 app.use(cors({
   origin: function(origin, callback) {
@@ -168,6 +170,44 @@ app.post('/logout', auth, async (req, res) => {
   }
 });
 
+
+app.post("/verify",
+  (req, res, next) => {
+  req.skipEmailAuth = true; next();},auth,                         async (req, res) => {
+  const id=req.user.userID;
+
+  const [[email]]= await con.promise().query("SELECT ud.email FROM userdata ud WHERE ud.userID = ?", [id]);
+  if(!email)
+  {
+    return res.status(400).json({message: "Secili bir mail adresiniz yok, lutfen adminle gorusunuz!"});
+  }
+
+  email.email ="ridvannaguss51@gmail.com"
+
+
+  const [[rows]] = await con.promise().query("SELECT u.auth FROM user u WHERE u.userID = ? AND u.auth = 0", [id]);
+  if(!rows)
+  {
+    return res.status(400).json({message: "Zaten dogrulanmissiniz!"});
+  }
+  try{
+    let code = "";
+
+    for (let i = 0; i < 4; i++) {
+      code += Math.floor(Math.random() * 10);
+    }
+
+    const [query] = await con.promise().query("UPDATE user u SET u.code = ?, u.cdt = NOW() WHERE u.userID = ?", [code, id]);
+    await sendmail(email.email,code);
+    return res.status(200).json({ message: "Dogrulama kodu gonderildi" });
+  }
+
+  catch(error)
+  {
+    console.error("Login error:", error);
+    return res.status(500).json({ message: "Sunucu hatasi" });
+  }
+});
 
 app.get('/getCountries', auth, perm(1,2),
 async(req, res) => {
