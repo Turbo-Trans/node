@@ -9,8 +9,27 @@ const bcrypt = require("bcrypt");
 const con = require("./components/db");
 const auth = require('./components/auth');
 const perm = require('./components/perm');
+const nodemailer = require("nodemailer");
 
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,  
+  auth: {
+    user: process.env.email,
+    pass: process.env.emailpw,
+  },
+});
 
+async function sendmail(email,text){
+  const info = await transporter.sendMail({
+    from: '"Lasttik.com - Turbo Trans" <ttrans25@gmail.com>',
+    to: "ridvannaguss51@gmail.com",
+    subject: "Your OTP",
+    text: "", 
+    html: "<b>${text}</b>", 
+  });
+};
 
 app.use(cors({
   origin: function(origin, callback) {
