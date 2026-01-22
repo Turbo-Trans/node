@@ -1033,6 +1033,16 @@ app.post('/addProduct', auth, perm(1, 2), async (req, res) => {
 
 app.put('/editProduct', auth, perm(1, 2), async (req, res) => {
   const id = req.query.id;
+  const {
+    productShape,
+    sender,
+    isBreakable,
+    weight,
+    dimensionX,
+    dimensionY,
+    dimensionZ,
+    statusID
+  } = req.body;
   if (!id) {
     return res.status(400).json({ message: "ID giriniz => /editProduct?id=1" });
   }
