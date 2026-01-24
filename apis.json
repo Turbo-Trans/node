@@ -665,6 +665,34 @@
         },
         "500": { "error": "Veritabanı hatası." }
       }
+    },
+    {
+    "name": "Send Verification Code",
+    "method": "POST",
+    "url": "/sendcode",
+    "permission": "Authenticated User",
+    "description": "Sends a 4-digit verification code to the registered email. Rate limited to 1 request per minute.",
+    "responses": {
+      "200": { "message": "Dogrulama kodu gonderildi" },
+      "400": { "message": "Secili bir mail adresiniz yok / Zaten dogrulanmissiniz" },
+      "429": { "message": "Her dakika bir kod gönderebilirsiniz!" },
+      "500": { "message": "Sunucu hatasi" }
     }
+  },
+  {
+    "name": "Verify Code",
+    "method": "POST",
+    "url": "/verify",
+    "permission": "Authenticated User",
+    "description": "Verifies the user account using the 4-digit code sent via email. Code expires in 15 minutes.",
+    "body": {
+      "code": "string (required)"
+    },
+    "responses": {
+      "200": { "message": "Dogrulama Islemi Basarili" },
+      "400": { "message": "Lutfen kod girin / Yanlis kod / Kod suresi dolmus" },
+      "500": { "message": "Veritabani Hatasi" }
+    }
+  }
   ]
 }

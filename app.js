@@ -10,6 +10,7 @@ const con = require("./components/db");
 const auth = require('./components/auth');
 const perm = require('./components/perm');
 const nodemailer = require("nodemailer");
+const rateLimit = require('express-rate-limit');
 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
@@ -20,6 +21,15 @@ const transporter = nodemailer.createTransport({
     pass: process.env.emailpw,
   },
 });
+
+
+
+const limiter = rateLimit({
+  windowMs: 2 * 60 * 1000, 
+  max: 100,
+  message: "Cok Fazla istek attınız!",
+});
+
 
 async function sendmail(email,text){
   const info = await transporter.sendMail({
@@ -72,7 +82,7 @@ app.listen(PORT, async () => {
   console.log("Hashed:", hashed);
 });*/
 
-app.post('/login', async (req, res) => {
+app.post('/login', limiter, async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -151,7 +161,7 @@ app.post('/login', async (req, res) => {
 });
 
 
-app.post('/logout', auth, async (req, res) => {
+app.post('/logout',limiter, auth, async (req, res) => {
   try {
     await con.promise().query(
       "UPDATE user SET sessionToken = NULL WHERE userID = ?",
@@ -171,9 +181,13 @@ app.post('/logout', auth, async (req, res) => {
 });
 
 
-app.post("/verify",
+app.post("/sendcode", rateLimit({
+  windowMs: 1 * 60 * 1000, 
+  max: 1,
+  message: "Her dakika bir kod gönderebilirsiniz!",
+}),
   (req, res, next) => {
-  req.skipEmailAuth = true; next();},auth,                         async (req, res) => {
+  req.skipEmailAuth = true; next();},auth, async (req, res) => {
   const id=req.user.userID;
 
   const [[email]]= await con.promise().query("SELECT ud.email FROM userdata ud WHERE ud.userID = ?", [id]);
@@ -182,9 +196,6 @@ app.post("/verify",
     return res.status(400).json({message: "Secili bir mail adresiniz yok, lutfen adminle gorusunuz!"});
   }
 
-  email.email ="ridvannaguss51@gmail.com"
-
-
   const [[rows]] = await con.promise().query("SELECT u.auth FROM user u WHERE u.userID = ? AND u.auth = 0", [id]);
   if(!rows)
   {
@@ -192,7 +203,6 @@ app.post("/verify",
   }
   try{
     let code = "";
-
     for (let i = 0; i < 4; i++) {
       code += Math.floor(Math.random() * 10);
     }
@@ -209,7 +219,52 @@ app.post("/verify",
   }
 });
 
-app.get('/getCountries', auth, perm(1,2),
+app.post('/verify',limiter, (req, res, next) => {
+  req.skipEmailAuth = true; next();},auth, async (req, res) => {
+  const { code } = req.body;
+  if(!code)
+  {
+    return res.status(400).json({message: "Lutfen kod girin!"});
+  }
+  try{
+    const [rows] = await con.promise().query('SELECT * FROM user WHERE userID = ?',[req.user.userID]);
+    console.log([rows]);
+    if(rows.length === 0)
+    {
+      return res.status(400).json({message: "USER KAYITLI DEGIL!"});
+    }
+    if(rows[0].auth === 1)
+    {
+      return res.status(400).json({message: "Zaten verification tamamlanmis!"});
+    }
+    const date = new Date(rows[0].cdt);
+    const today = new Date();
+   if(date > today)
+    {
+      return res.status(400).json({message: "Hatali Kod!"});
+    }
+    else if(today - date.getTime() < 15*60*1000)
+    {
+      if(rows[0].code === code)
+      {
+        await con.promise().query("UPDATE user SET auth=1, verified_at=NOW() WHERE userID=?",[req.user.userID]);
+        return res.status(200).json({message: "Dogrulama Islemi Basarili"});
+      }
+      else {
+        return res.status(400).json({message: "Yanlis kod!"});
+      }
+    } 
+  }
+catch(error)
+{
+  console.error("DB Error:", error);
+  return res.status(500).json("Veritabani Hatasi");
+}
+});
+
+
+
+app.get('/getCountries',limiter, auth, perm(1,2),
 async(req, res) => {
   try{
     const query = 'select * from countries';
@@ -226,7 +281,7 @@ async(req, res) => {
   }
 });
 
-app.get('/getCities', auth, perm(1, 2), async (req, res) => {
+app.get('/getCities',limiter, auth, perm(1, 2), async (req, res) => {
   const id = req.query.id || '';
   try {
     if(!id)
@@ -245,7 +300,7 @@ app.get('/getCities', auth, perm(1, 2), async (req, res) => {
 
 })
 
-app.get('/getUsers', auth, perm(1, 2), async (req, res) => {
+app.get('/getUsers',limiter, auth, perm(1, 2), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const offset = (page - 1) * limit;
@@ -353,7 +408,7 @@ app.get('/getUsers', auth, perm(1, 2), async (req, res) => {
 
 
 
-app.post('/addUser', auth, perm(1), async (req, res) => {
+app.post('/addUser',limiter, auth, perm(1), async (req, res) => {
   let {
     username,
     password,
@@ -455,7 +510,7 @@ app.post('/addUser', auth, perm(1), async (req, res) => {
 
 
 
-app.delete('/deleteUser', auth, perm(1), async (req, res) => {
+app.delete('/deleteUser',limiter, auth, perm(1), async (req, res) => {
   const id = req.query.userID;
 
   if (!id) {
@@ -536,7 +591,7 @@ app.delete('/deleteUser', auth, perm(1), async (req, res) => {
 });
 
 
-app.get('/getWH', auth, perm(1), async (req, res) => {
+app.get('/getWH',limiter, auth, perm(1), async (req, res) => {
   const id = req.query.id || '';
   const name = req.query.name || '';
   const limit = 10;
@@ -602,7 +657,7 @@ app.get('/getWH', auth, perm(1), async (req, res) => {
   }
 });
 
-app.post('/addWH', auth, perm(1), async (req, res) => {
+app.post('/addWH',limiter, auth, perm(1), async (req, res) => {
   const { warehouseName, warehouseCityID, warehouseAddress } = req.body;
 
   if (!warehouseCityID)
@@ -642,7 +697,7 @@ app.put('/editWH', auth, perm(1), async (req, res) => {
   }
 });
 
-app.delete('/deleteWH', auth, perm(1), async (req, res) => {
+app.delete('/deleteWH',limiter, auth, perm(1), async (req, res) => {
   const id = req.query.id;
 
   if (!id)
@@ -667,7 +722,7 @@ app.delete('/deleteWH', auth, perm(1), async (req, res) => {
   }
 });
 
-app.post('/addTruck', auth, perm(1), async (req, res) => {
+app.post('/addTruck',limiter, auth, perm(1), async (req, res) => {
   const { truckBrand, truckModel } = req.body;
 
   const query = `INSERT INTO trucks (truckBrand, truckModel) VALUES (?, ?)`;
@@ -681,7 +736,7 @@ app.post('/addTruck', auth, perm(1), async (req, res) => {
   }
 });
 
-app.delete('/removeTruck', auth, perm(1), async (req, res) => {
+app.delete('/removeTruck',limiter, auth, perm(1), async (req, res) => {
   const id = req.query.id;
 
   if (!id)
@@ -706,7 +761,7 @@ app.delete('/removeTruck', auth, perm(1), async (req, res) => {
   }
 });
 
-app.get('/listTrucks', auth, perm(1, 2), async (req, res) => {
+app.get('/listTrucks',limiter, auth, perm(1, 2), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -757,7 +812,7 @@ app.get('/listTrucks', auth, perm(1, 2), async (req, res) => {
   }
 });
 
-app.post('/addTruckInfo', auth, perm(1), async (req, res) => {
+app.post('/addTruckInfo',limiter, auth, perm(1), async (req, res) => {
   const { plate, truckID } = req.body;
 
   if (!plate || !truckID)
@@ -774,7 +829,7 @@ app.post('/addTruckInfo', auth, perm(1), async (req, res) => {
   }
 });
 
-app.put('/editTruckInfo', auth, perm(1), async (req, res) => {
+app.put('/editTruckInfo',limiter, auth, perm(1), async (req, res) => {
   const id = req.query.id;
   const { plate, truckID } = req.body;
 
@@ -797,7 +852,7 @@ app.put('/editTruckInfo', auth, perm(1), async (req, res) => {
   }
 });
 
-app.delete('/removeTruckInfo', auth, perm(1), async (req, res) => {
+app.delete('/removeTruckInfo',limiter, auth, perm(1), async (req, res) => {
   const id = req.query.id;
 
   if (!id)
@@ -822,7 +877,7 @@ app.delete('/removeTruckInfo', auth, perm(1), async (req, res) => {
   }
 });
 
-app.get('/listTruckInfo', auth, perm(1, 2), async (req, res) => {
+app.get('/listTruckInfo',limiter, auth, perm(1, 2), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -896,7 +951,7 @@ app.get('/listTruckInfo', auth, perm(1, 2), async (req, res) => {
 
 
 
-app.get('/listProducts', auth, perm(1, 2), async (req, res) => {
+app.get('/listProducts',limiter, auth, perm(1, 2), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -1071,7 +1126,7 @@ app.post('/addProduct', auth, perm(1, 2), async (req, res) => {
   }
 });
 
-app.put('/editProduct', auth, perm(1, 2), async (req, res) => {
+app.put('/editProduct',limiter, auth, perm(1, 2), async (req, res) => {
   const id = req.query.id;
   const {
     productShape,
@@ -1163,7 +1218,7 @@ app.put('/editProduct', auth, perm(1, 2), async (req, res) => {
 });
 
 
-app.delete('/deleteProduct', auth, perm(1, 2), async (req, res) => {
+app.delete('/deleteProduct',limiter, auth, perm(1, 2), async (req, res) => {
   const id = req.query.id;
 
   if (!id) {
@@ -1212,7 +1267,7 @@ app.delete('/deleteProduct', auth, perm(1, 2), async (req, res) => {
   }
 });
 
-app.get('/listProductShapes', auth, perm(1, 2), async (req, res) => {
+app.get('/listProductShapes',limiter, auth, perm(1, 2), async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.max(parseInt(req.query.limit) || 10, 1);
@@ -1245,7 +1300,7 @@ app.get('/listProductShapes', auth, perm(1, 2), async (req, res) => {
   }
 });
 
-app.post('/createOrder', auth, perm(1, 2), async (req, res) => {
+app.post('/createOrder',limiter, auth, perm(1, 2), async (req, res) => {
   const { 
     receiverID, 
     productIDs, 
@@ -1405,7 +1460,7 @@ app.post('/createOrder', auth, perm(1, 2), async (req, res) => {
   }
 });
 
-app.get('/listOrders', auth, perm(1, 2), async (req, res) => {
+app.get('/listOrders',limiter, auth, perm(1, 2), async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.max(parseInt(req.query.limit) || 10, 1);
@@ -1500,7 +1555,7 @@ app.get('/listOrders', auth, perm(1, 2), async (req, res) => {
 });
 
 
-app.get('/orderDetails', auth, perm(1, 2), async (req, res) => {
+app.get('/orderDetails',limiter, auth, perm(1, 2), async (req, res) => {
   const { orderID } = req.query;
 
   if (!orderID) {
@@ -1659,7 +1714,7 @@ app.delete('/deleteOrder', auth, perm(1, 2), async (req, res) => {
 });
 
 
-app.post('/addTrailer', auth, perm(1), async (req, res) => {
+app.post('/addTrailer',limiter,auth, perm(1), async (req, res) => {
   const { 
     dimensionX, 
     dimensionY, 
@@ -1697,7 +1752,7 @@ app.post('/addTrailer', auth, perm(1), async (req, res) => {
   }
 });
 
-app.delete('/removeTrailer', auth, perm(1), async (req, res) => {
+app.delete('/removeTrailer',limiter, auth, perm(1), async (req, res) => {
   const id = req.query.id;
 
   if (!id) {
@@ -1725,7 +1780,7 @@ app.delete('/removeTrailer', auth, perm(1), async (req, res) => {
   }
 });
 
-app.get('/listTrailers', auth, perm(1, 2), async (req, res) => {
+app.get('/listTrailers',limiter, auth, perm(1, 2), async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.max(parseInt(req.query.limit) || 10, 1);
@@ -1754,7 +1809,7 @@ app.get('/listTrailers', auth, perm(1, 2), async (req, res) => {
 });
 
 
-app.post('/createReceiver', auth, perm(1, 2), async (req, res) => {
+app.post('/createReceiver',limiter, auth, perm(1, 2), async (req, res) => {
   const { receiverName, receiverCityID, receiverAddress } = req.body;
 
   if (!receiverName || !receiverCityID || !receiverAddress) {
@@ -1785,7 +1840,7 @@ app.post('/createReceiver', auth, perm(1, 2), async (req, res) => {
   }
 });
 
-app.delete('/removeReceiver', auth, perm(1), async (req, res) => {
+app.delete('/removeReceiver',limiter, auth, perm(1), async (req, res) => {
   const id = req.query.id;
 
   if (!id) {
@@ -1816,7 +1871,7 @@ app.delete('/removeReceiver', auth, perm(1), async (req, res) => {
 });
 
 
-app.get('/listReceivers', auth, perm(1, 2), async (req, res) => {
+app.get('/listReceivers',limiter, auth, perm(1, 2), async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.max(parseInt(req.query.limit) || 10, 1);
