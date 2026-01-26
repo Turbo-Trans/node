@@ -104,11 +104,11 @@ app.post('/login', limiter, async (req, res) => {
         ud.warehouseID
       FROM user u
       LEFT JOIN userdata ud ON u.userID = ud.userID
-      WHERE u.username = ?
+      WHERE u.username = ? OR ud.email = ?
       LIMIT 1
     `;
 
-    const [rows] = await con.promise().query(query, [username]);
+    const [rows] = await con.promise().query(query, [username, username]);
 
     if (rows.length === 0) {
       return res.status(401).json({ message: "Kullanici bulunamadi" });
