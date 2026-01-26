@@ -408,7 +408,7 @@ app.get('/getUsers',limiter, auth, perm(1, 2), async (req, res) => {
 
 
 
-app.post('/addUser',limiter, auth, perm(1), async (req, res) => {
+app.post('/addUser', limiter, auth, perm(1), async (req, res) => {
   let {
     username,
     password,
@@ -420,6 +420,12 @@ app.post('/addUser',limiter, auth, perm(1), async (req, res) => {
     job,
     warehouseID
   } = req.body;
+
+  username = username ? username.trim() : null;
+  email = email ? email.trim() : null;
+  tel = tel ? tel.toString().trim() : null;
+  address = address ? address.trim() : null;
+  job = job ? job.trim() : null;
 
   if (
     !username ||
@@ -434,80 +440,73 @@ app.post('/addUser',limiter, auth, perm(1), async (req, res) => {
   ) {
     return res.status(400).json({ message: "Eksik alan girisi." });
   }
+
+  if (email.length > 100 || !email.includes('@') || !email.includes('.')) {
+    return res.status(400).json({ message: "Gecersiz email formati." });
+  }
+
+  const telRegex = /^(05\d{9}|5\d{9})$/;
+  if (!telRegex.test(tel)) {
+    return res.status(400).json({
+      message: "Telefon numarasi 05xxxxxxxxx veya 5xxxxxxxxx olabilir"
+    });
+  }
+
   let uQuery = 'SELECT u.username FROM user u WHERE u.username = ?';
-  [usernameQuery] = await con.promise().query(uQuery, [username]);
+  let [usernameQuery] = await con.promise().query(uQuery, [username]);
 
-  if(usernameQuery.length > 0)
-  {
-    return res.status(400).json({ message: "Var olan Username giremezsiniz!"});
+  if (usernameQuery.length > 0) {
+    return res.status(400).json({ message: "Var olan Username giremezsiniz!" });
   }
 
-  uQuery = 'SELECT ud.email FROM userdata ud JOIN user u ON ud.userID = u.userID WHERE ud.email = ?'
+  uQuery = 'SELECT ud.email FROM userdata ud JOIN user u ON ud.userID = u.userID WHERE ud.email = ?';
   const [emailQuery] = await con.promise().query(uQuery, [email]);
-  if(emailQuery.length > 0)
-  {
-    return res.status(400).json({ message: "Var olan email giremezsiniz!"});
+  if (emailQuery.length > 0) {
+    return res.status(400).json({ message: "Var olan email giremezsiniz!" });
   }
-
 
   if (username.length > 50) {
-    return res
-      .status(400)
-      .json({ message: "Kullanici Adi 50 karakterden buyuk olamaz" });
+    return res.status(400).json({ message: "Kullanici Adi 50 karakterden buyuk olamaz" });
   }
 
   if (password.length < 8 || password.length > 64) {
-    return res.status(400).json({
-      message: "Sifre en az 8, en fazla 64 karakter olmalidir"
-    });
+    return res.status(400).json({ message: "Sifre en az 8, en fazla 64 karakter olmalidir" });
   }
 
   const hasUpperCase = /[\p{Lu}]/u.test(password);
   const hasNumber = /\d/.test(password);
   const hasSpecialChar = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(password);
 
-  if (!hasUpperCase) {
-    return res.status(400).json({
-      message: "Sifre en az 1 buyuk harf icermelidir"
-    });
-  }
+  if (!hasUpperCase) return res.status(400).json({ message: "Sifre en az 1 buyuk harf icermelidir" });
+  if (!hasNumber) return res.status(400).json({ message: "Sifre en az 1 rakam icermelidir" });
+  if (!hasSpecialChar) return res.status(400).json({ message: "Sifre en az 1 ozel karakter icermelidir" });
 
-  if (!hasNumber) {
-    return res.status(400).json({
-      message: "Sifre en az 1 rakam icermelidir"
-    });
-  }
-
-  if (!hasSpecialChar) {
-    return res.status(400).json({
-      message: "Sifre en az 1 ozel karakter icermelidir"
-    });
-  }
+  const connection = await con.promise().getConnection();
 
   try {
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    let query =
-      "INSERT INTO user (username, password, permission) VALUES (?, ?, ?)";
-    let [result] = await con
-      .promise()
-      .query(query, [username, hashedPassword, permission]);
+    await connection.beginTransaction();
+
+    let query = "INSERT INTO user (username, password, permission) VALUES (?, ?, ?)";
+    let [result] = await connection.query(query, [username, hashedPassword, permission]);
 
     const userID = result.insertId;
 
-    query =
-      "INSERT INTO userdata (userID, email, tel, cityID, address, job, warehouseID) VALUES (?, ?, ?, ?, ?, ?, ?)";
-    await con
-      .promise()
-      .query(query, [userID, email, tel, cityID, address, job, warehouseID]);
+    query = "INSERT INTO userdata (userID, email, tel, cityID, address, job, warehouseID) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    await connection.query(query, [userID, email, tel, cityID, address, job, warehouseID]);
+
+    await connection.commit();
 
     res.status(200).json({ message: "Islem Basarili" });
   } catch (error) {
+    await connection.rollback();
     console.error("SQL Hatasi", error);
-    return res.status(500).json({ error: "SQL Hatasi" });
+    return res.status(500).json({ error: "Islem sirasinda bir hata olustu." });
+  } finally {
+    connection.release();
   }
 });
-
 
 
 app.delete('/deleteUser',limiter, auth, perm(1), async (req, res) => {

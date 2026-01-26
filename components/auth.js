@@ -33,7 +33,7 @@ module.exports = async function (req, res, next) {
       [decoded.userID]
     );
 
-    if (!authcheck[0] || authcheck[0].auth === 0) {
+    if (!authcheck[0] || authcheck[0].auth != 1) {
       return res.status(401).json({
         message: "Lutfen Epostanizi onaylayin!"
       });
