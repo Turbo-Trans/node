@@ -285,7 +285,6 @@ app.post("/sendcode", rateLimit({
     }
 
     const [query] = await con.promise().query("UPDATE user u SET u.code = ?, u.cdt = NOW() WHERE u.userID = ?", [code, id]);
-    email.email = "ridvannaguss51@gmail.com";
     await sendmail(email.email,code,username);
     return res.status(200).json({ message: "Dogrulama kodu gonderildi" });
   }
@@ -1040,7 +1039,8 @@ app.get('/listProducts',limiter, auth, perm(1, 2), async (req, res) => {
       sender,
       date,
       breakable,
-      status
+      status,
+      receiverID
     } = req.query;
 
     const userID = req.user.userID;
@@ -1071,6 +1071,11 @@ app.get('/listProducts',limiter, auth, perm(1, 2), async (req, res) => {
       whereConditions.push('product.sender LIKE ?');
       params.push(`%${sender}%`);
     }
+    
+    if (receiverID) {
+        whereConditions.push('product.receiverID = ?');
+        params.push(receiverID);
+    }
 
     if (date) {
       whereConditions.push('DATE(product.dateReceived) = ?');
@@ -1094,10 +1099,12 @@ app.get('/listProducts',limiter, auth, perm(1, 2), async (req, res) => {
         product.*, 
         statustype.statusName,
         status.statusDate,
-        status.statusType
+        status.statusType,
+        receiver.receiverName
       FROM product
       LEFT JOIN status ON product.statusID = status.statusID
       LEFT JOIN statustype ON status.statusType = statustype.statusTypeID
+      LEFT JOIN receiver ON product.receiverID = receiver.receiverID
       ${whereClause}
       ORDER BY product.dateReceived DESC
       LIMIT ? OFFSET ?
@@ -1140,11 +1147,12 @@ app.post('/addProduct', auth, perm(1, 2), async (req, res) => {
     weight,
     dimensionX,
     dimensionY,
-    dimensionZ
+    dimensionZ,
+    receiverID
   } = req.body;
 
-  if (!productShape || !sender) {
-    return res.status(400).json({ message: "Eksik alan girisi." });
+  if (!productShape || !sender || !receiverID) {
+    return res.status(400).json({ message: "Eksik alan girisi (Alıcı, Gönderici ve Şekil zorunludur)." });
   }
 
   let connection;
@@ -1162,6 +1170,12 @@ app.post('/addProduct', auth, perm(1, 2), async (req, res) => {
       await connection.rollback();
       return res.status(403).json({ message: "Depo bilgin bulunamadi." });
     }
+    
+    const [receiverCheck] = await connection.query('SELECT 1 FROM receiver WHERE receiverID = ?', [receiverID]);
+    if (receiverCheck.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Geçersiz ReceiverID." });
+    }
 
     const warehouseID = userWH[0].warehouseID;
 
@@ -1172,13 +1186,14 @@ app.post('/addProduct', auth, perm(1, 2), async (req, res) => {
 
     const insertQuery = `
       INSERT INTO product 
-      (productShape, sender, isBreakable, weight, dimensionX, dimensionY, dimensionZ, warehouse, statusID, dateReceived)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      (productShape, sender, receiverID, isBreakable, weight, dimensionX, dimensionY, dimensionZ, warehouse, statusID, dateReceived)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
 
     const [productResult] = await connection.query(insertQuery, [
       productShape,
       sender,
+      receiverID,
       isBreakable || 0,
       weight || 0,
       dimensionX || 0,
@@ -1208,6 +1223,7 @@ app.put('/editProduct',limiter, auth, perm(1, 2), async (req, res) => {
   const {
     productShape,
     sender,
+    receiverID,
     isBreakable,
     weight,
     dimensionX,
@@ -1249,11 +1265,21 @@ app.put('/editProduct',limiter, auth, perm(1, 2), async (req, res) => {
       connection.release();
       return res.status(403).json({ message: "Bu urunu guncelleyemezsin." });
     }
+    
+    if (receiverID) {
+         const [rCheck] = await connection.query('SELECT 1 FROM receiver WHERE receiverID = ?', [receiverID]);
+         if (rCheck.length === 0) {
+             await connection.rollback();
+             connection.release();
+             return res.status(404).json({ message: "Geçersiz ReceiverID." });
+         }
+    }
 
     await connection.query(
       `UPDATE product SET
         productShape = ?,
         sender = ?,
+        receiverID = ?,
         isBreakable = ?,
         weight = ?,
         dimensionX = ?,
@@ -1263,6 +1289,7 @@ app.put('/editProduct',limiter, auth, perm(1, 2), async (req, res) => {
       [
         productShape,
         sender,
+        receiverID,
         isBreakable,
         weight,
         dimensionX,
@@ -1293,7 +1320,6 @@ app.put('/editProduct',limiter, auth, perm(1, 2), async (req, res) => {
     return res.status(500).json({ message: "Veritabani hatasi." });
   }
 });
-
 
 app.delete('/deleteProduct',limiter, auth, perm(1, 2), async (req, res) => {
   const id = req.query.id;
@@ -1377,9 +1403,8 @@ app.get('/listProductShapes',limiter, auth, perm(1, 2), async (req, res) => {
   }
 });
 
-app.post('/createOrder',limiter, auth, perm(1, 2), async (req, res) => {
+app.post('/createOrder', limiter, auth, perm(1, 2), async (req, res) => {
   const { 
-    receiverID, 
     productIDs, 
     truckInfoID, 
     trailerID, 
@@ -1388,14 +1413,13 @@ app.post('/createOrder',limiter, auth, perm(1, 2), async (req, res) => {
   } = req.body;
 
   if (
-    !receiverID || 
     !truckInfoID || 
     !trailerID || 
     !productIDs || 
     !Array.isArray(productIDs) || 
     productIDs.length === 0
   ) {
-    return res.status(400).json({ message: "Eksik bilgi: Alıcı, Araç (TruckInfo), Dorse (Trailer) ve Ürün listesi zorunludur." });
+    return res.status(400).json({ message: "Eksik bilgi: Araç (TruckInfo), Dorse (Trailer) ve Ürün listesi zorunludur." });
   }
 
   const connection = await con.promise().getConnection();
@@ -1414,16 +1438,6 @@ app.post('/createOrder',limiter, auth, perm(1, 2), async (req, res) => {
     }
 
     const userWarehouseID = userCheck[0].warehouseID;
-
-    const [receiverCheck] = await connection.query(
-      'SELECT count(*) as cnt FROM receiver WHERE receiverID = ?',
-      [receiverID]
-    );
-
-    if (receiverCheck[0].cnt === 0) {
-      await connection.rollback();
-      return res.status(404).json({ message: "Alıcı bulunamadı." });
-    }
 
     const [truckCheck] = await connection.query(
       'SELECT count(*) as cnt FROM truckinfo WHERE truckInfoID = ?',
@@ -1479,7 +1493,6 @@ app.post('/createOrder',limiter, auth, perm(1, 2), async (req, res) => {
     );
     const newCombinationID = combResult.insertId;
 
-    // Format: #xyzab (Year|Month|Day|Hour|Minutes|Seconds|UserID)
     const now = new Date();
     const x = now.getFullYear();
     const y = now.getMonth() + 1; 
@@ -1492,8 +1505,8 @@ app.post('/createOrder',limiter, auth, perm(1, 2), async (req, res) => {
     const orderNumber = `#${x}-${y}-${z}-${h}-${m}-${s}-${b}`;
 
     const [orderResult] = await connection.query(
-      'INSERT INTO orders (orderNumber, receiverID) VALUES (?, ?)',
-      [orderNumber, receiverID]
+      'INSERT INTO orders (orderNumber) VALUES (?)',
+      [orderNumber]
     );
     const newOrderID = orderResult.insertId;
 
@@ -1537,7 +1550,7 @@ app.post('/createOrder',limiter, auth, perm(1, 2), async (req, res) => {
   }
 });
 
-app.get('/listOrders',limiter, auth, perm(1, 2), async (req, res) => {
+app.get('/listOrders', limiter, auth, perm(1, 2), async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.max(parseInt(req.query.limit) || 10, 1);
@@ -1581,30 +1594,32 @@ app.get('/listOrders',limiter, auth, perm(1, 2), async (req, res) => {
 
     const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
 
+    // Count Query
     const countQuery = `
       SELECT COUNT(DISTINCT o.orderID) as total
       FROM orders o
       JOIN product p ON o.orderID = p.orderID
-      LEFT JOIN receiver r ON o.receiverID = r.receiverID
+      LEFT JOIN receiver r ON p.receiverID = r.receiverID
       LEFT JOIN itinerary i ON o.orderID = i.orderID
       ${whereClause}
     `;
 
     const [[{ total }]] = await con.promise().query(countQuery, params);
 
+    // FIXED Data Query: Added MAX() around non-aggregated columns
     const dataQuery = `
       SELECT 
         o.orderID,
         o.orderNumber,
-        r.receiverName,
-        r.receiverAddress,
-        c.cityName as receiverCity,
-        co.countryName as receiverCountry,
+        MAX(r.receiverName) as receiverName,
+        MAX(r.receiverAddress) as receiverAddress,
+        MAX(c.cityName) as receiverCity,
+        MAX(co.countryName) as receiverCountry,
         COUNT(DISTINCT p.productID) as productCount,
         i.active as itineraryActive
       FROM orders o
       JOIN product p ON o.orderID = p.orderID
-      LEFT JOIN receiver r ON o.receiverID = r.receiverID
+      LEFT JOIN receiver r ON p.receiverID = r.receiverID
       LEFT JOIN cities c ON r.receiverCityID = c.cityID
       LEFT JOIN countries co ON c.countryID = co.countryID
       LEFT JOIN itinerary i ON o.orderID = i.orderID
@@ -1631,8 +1646,7 @@ app.get('/listOrders',limiter, auth, perm(1, 2), async (req, res) => {
   }
 });
 
-
-app.get('/orderDetails',limiter, auth, perm(1, 2), async (req, res) => {
+app.get('/orderDetails', limiter, auth, perm(1, 2), async (req, res) => {
   const { orderID } = req.query;
 
   if (!orderID) {
@@ -1671,7 +1685,8 @@ app.get('/orderDetails',limiter, auth, perm(1, 2), async (req, res) => {
         tr.dimensionX as trailerDimX, tr.dimensionY as trailerDimY, tr.dimensionZ as trailerDimZ,
         tr.wlimit as trailerWLimit, tr.axis_d
       FROM orders o
-      LEFT JOIN receiver r ON o.receiverID = r.receiverID
+      JOIN product p ON o.orderID = p.orderID
+      LEFT JOIN receiver r ON p.receiverID = r.receiverID
       LEFT JOIN cities c ON r.receiverCityID = c.cityID
       LEFT JOIN countries co ON c.countryID = co.countryID
       LEFT JOIN itinerary i ON o.orderID = i.orderID
@@ -1680,6 +1695,7 @@ app.get('/orderDetails',limiter, auth, perm(1, 2), async (req, res) => {
       LEFT JOIN trucks t ON ti.truckID = t.truckID
       LEFT JOIN trailer tr ON comb.trailerID = tr.trailerID
       WHERE o.orderID = ?
+      LIMIT 1
     `;
 
     const [details] = await con.promise().query(queryDetails, [orderID]);
@@ -1940,7 +1956,7 @@ app.delete('/removeReceiver',limiter, auth, perm(1), async (req, res) => {
     console.error("Remove Receiver Error:", err);
     
     if (err.code === 'ER_ROW_IS_REFERENCED_2') {
-      return res.status(400).json({ message: "Bu alıcıya ait sipariş kayıtları bulunduğu için silinemez." });
+      return res.status(400).json({ message: "Bu alıcıya ait ürün kayıtları bulunduğu için silinemez." });
     }
     
     return res.status(500).json({ error: "Veritabanı hatası." });
