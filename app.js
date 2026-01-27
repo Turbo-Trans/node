@@ -31,77 +31,90 @@ const limiter = rateLimit({
 });
 
 
-async function sendmail(email,text){
-  const htmlContent = 
-  `<!DOCTYPE html>
+async function sendmail(email, text, username) {
+  const htmlContent = `
+<!DOCTYPE html>
 <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            .otp-digit 
-            {
-                display: inline-block;
-                width: 50px;
-                height: 50px;
-                line-height: 40px;
-                text-align: center;
-                border: 1px solid #3b85f6;
-                border-radius: 8px;
-                margin: 0 5px;
-                font-size: 24px;
-                color: #1e3a8a;
-                font-weight: bold;
-            }
-        </style>
-    </head>
-    <body style="margin: 0; padding: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f3f4f6;">
-        <div style="background-color: #f3f4f6; padding: 40px 10px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-            <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <div style="padding: 20px; text-align: center;">
-                    <span style="color: #050063; font-weight: bold; font-size: 40px; vertical-align: middle; margin-left: 8px;">Last</span>
-                    <img src="favicon.ico" alt="lasttiklogo" width="45" style="vertical-align: middle; border: 0;">
-                </div>
+  <head>
+    <meta charset="utf-8">
+  </head>
+  <body style="margin:0;padding:0;font-family:Helvetica,Arial,sans-serif;background-color:#f3f4f6;">
+    <div style="background-color:#f3f4f6;padding:40px 10px;">
+      <div style="max-width:600px;margin:0 auto;background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
 
-                <div style="background-color: #3b82f6; padding: 40px 20px; text-align: center;">
-                    <div style="text-align: center; margin-bottom: 15px;">
-                    <div style="display: inline-block; position: relative; width: 120px; height: 20px;">
-                        <div style="position: absolute; top: 10px; left: 0; width: 40px; border-top: 1px solid #ffffff; opacity: 0.5;"></div>
-                        <span style="color: #ffffff; font-size: 18px; line-height: 20px;">&#9993;</span>
-                        <div style="position: absolute; top: 10px; right: 0; width: 40px; border-top: 1px solid #ffffff; opacity: 0.5;"></div>
-                    </div>
-                    </div>
-                    <p style="margin: 0; color: #ffffff; text-transform: uppercase; letter-spacing: 2px; font-size: 14px;">Lasttik'e Hoşgeldiniz!</p>
-                    <h1 style="margin: 10px 0 0 0; color: #ffffff; font-size: 28px; font-weight: 600;">E-Mail Adresinizi Onaylayın</h1>
-                </div>
-                <div style="padding: 40px 30px;">
-                    <p style="margin: 0 0 10px 0; font-size: 16px; color: #4b5563;">Merhaba, PlaceHolder.</p>
-                    <p style="margin: 0 0 25px 0; font-size: 16px; color: #4b5563;">Lütfen bunun için aşağıdaki tek kullanımlık (OTP) şifreyi kullanın: </p>
-                    <div style="margin-bottom: 30px;">
-                        ${text.split('').map(char => `
-                        <span style="display: inline-block; width: 45px; height: 45px; line-height: 45px; text-align: center; border: 1px solid #3b82f6; border-radius: 8px; margin-right: 10px; font-size: 24px; color: #1e3a8a; font-weight: bold;">
-                            ${char}
-                        </span>
-                        `).join('')}
-                    </div>
-                          <div style="text-align: center;">
-                        <a href="https://lasttik.com/login" target="_blank" style="background-color: #e85c2d; color: #ffffff; padding: 12px 30px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;">
-                                Lasstik'e Gir
-                        </a>
-                    </div>
-                </div>
-            </div>
+        <!-- HEADER -->
+        <div style="padding:20px;text-align:center;">
+          <span style="color:#050063;font-weight:bold;font-size:40px;vertical-align:middle;margin-right:8px;">
+            Last
+          </span>
+          <img 
+            src="cid:lasttiklogo"
+            alt="Lasttik Logo"
+            width="45"
+            style="vertical-align:middle;border:0;"
+          >
         </div>
-    </body>
+
+        <!-- BLUE SECTION -->
+        <div style="background-color:#3b82f6;padding:40px 20px;text-align:center;">
+          <p style="margin:0;color:#ffffff;text-transform:uppercase;letter-spacing:2px;font-size:14px;">
+            Lasttik'e Hoşgeldiniz!
+          </p>
+          <h1 style="margin:10px 0 0;color:#ffffff;font-size:28px;font-weight:600;">
+            E-Mail Adresinizi Onaylayın
+          </h1>
+        </div>
+
+        <!-- CONTENT -->
+        <div style="padding:40px 30px;">
+          <p style="margin:0 0 10px;font-size:16px;color:#4b5563;">
+            Merhaba, ${username}.
+          </p>
+
+          <p style="margin:0 0 25px;font-size:16px;color:#4b5563;">
+            Lütfen aşağıdaki tek kullanımlık (OTP) şifreyi kullanın:
+          </p>
+
+          <div style="margin-bottom:30px;text-align:center;">
+            ${text.split('').map(char => `
+              <span style="display:inline-block;width:45px;height:45px;line-height:45px;text-align:center;border:1px solid #3b82f6;border-radius:8px;margin-right:8px;font-size:24px;color:#1e3a8a;font-weight:bold;">
+                ${char}
+              </span>
+            `).join('')}
+          </div>
+
+          <div style="text-align:center;">
+            <a href="https://lasttik.com/login" target="_blank"
+              style="background-color:#e85c2d;color:#ffffff;padding:12px 30px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block;">
+              Lasttik'e Gir
+            </a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </body>
 </html>
-  `;
+`;
+
   const info = await transporter.sendMail({
     from: '"Lasttik.com - Turbo Trans" <ttrans25@gmail.com>',
     to: email,
-    subject: "Your OTP: " + text,
-    text: text, 
+    subject: "Şifreniz: " + text,
+    text: `Şifreniz: ${text}`,
     html: htmlContent,
+    attachments: [
+      {
+        filename: 'favicon.ico',
+        path: './assets/favicon.ico', 
+        cid: 'lasttiklogo'
+      }
+    ]
   });
-};
+
+  return info;
+}
+
 
 
 
@@ -158,6 +171,7 @@ app.post('/login', limiter, async (req, res) => {
         u.username, 
         u.password, 
         u.permission,
+        u.auth,
         ud.email, 
         ud.tel, 
         ud.cityID, 
@@ -212,7 +226,8 @@ app.post('/login', limiter, async (req, res) => {
         cityID: user.cityID,
         address: user.address,
         job: user.job,
-        warehouseID: user.warehouseID
+        warehouseID: user.warehouseID,
+        auth: user.auth
       }
     });
 
@@ -251,7 +266,7 @@ app.post("/sendcode", rateLimit({
   (req, res, next) => {
   req.skipEmailAuth = true; next();},auth, async (req, res) => {
   const id=req.user.userID;
-
+  const username = req.user.username;
   const [[email]]= await con.promise().query("SELECT ud.email FROM userdata ud WHERE ud.userID = ?", [id]);
   if(!email)
   {
@@ -270,7 +285,8 @@ app.post("/sendcode", rateLimit({
     }
 
     const [query] = await con.promise().query("UPDATE user u SET u.code = ?, u.cdt = NOW() WHERE u.userID = ?", [code, id]);
-    await sendmail(email.email,code);
+    email.email = "ridvannaguss51@gmail.com";
+    await sendmail(email.email,code,username);
     return res.status(200).json({ message: "Dogrulama kodu gonderildi" });
   }
 
