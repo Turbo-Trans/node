@@ -13,6 +13,24 @@ const nodemailer = require("nodemailer");
 const rateLimit = require('express-rate-limit');
 const axios = require('axios');
 
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,  
+  auth: {
+    user: process.env.email,
+    pass: process.env.emailpw,
+  },
+});
+
+
+
+const limiter = rateLimit({
+  windowMs: 2 * 60 * 1000, 
+  max: 100,
+  message: "Cok Fazla istek attınız!",
+});
+
 app.post('/optimize', limiter, auth, perm(1, 2), async (req, res) => {
     const { product, orders, trailer, truckInfo } = req.body;
     if (!product || !orders || !trailer || !truckInfo) {
@@ -49,25 +67,6 @@ app.post('/optimize', limiter, auth, perm(1, 2), async (req, res) => {
         });
     }
 });
-
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,  
-  auth: {
-    user: process.env.email,
-    pass: process.env.emailpw,
-  },
-});
-
-
-
-const limiter = rateLimit({
-  windowMs: 2 * 60 * 1000, 
-  max: 100,
-  message: "Cok Fazla istek attınız!",
-});
-
 
 async function sendmail(email, text, username) {
   const htmlContent = `
