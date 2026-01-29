@@ -31,42 +31,6 @@ const limiter = rateLimit({
   message: "Cok Fazla istek attınız!",
 });
 
-app.post('/optimize', limiter, auth, perm(1, 2), async (req, res) => {
-    const { product, orders, trailer, truckInfo } = req.body;
-    if (!product || !orders || !trailer || !truckInfo) {
-        return res.status(400).json({ message: "Eksik veri gönderildi." });
-    }
-
-    const payload = {
-        products: Array.isArray(product) ? product : [product],
-        routes: Array.isArray(orders) ? orders : [orders], 
-        trailers: Array.isArray(trailer) ? trailer : [trailer],
-        trucks: Array.isArray(truckInfo) ? truckInfo : [truckInfo] 
-    };
-
-    try {
-        const optimizerUrl = process.env.OPTIMIZER_URL || 'http://optimizer:8000';
-        
-        console.log("Sending data to optimizer...");
-        
-        const response = await axios.post(`${optimizerUrl}/solve`, payload);
-
-        return res.status(200).json({
-            message: "Optimizasyon tamamlandı",
-            result: response.data
-        });
-
-    } catch (error) {
-        console.error("Optimization Service Error:", error.message);
-        if(error.response) {
-            console.error("Python Error Data:", error.response.data);
-        }
-        return res.status(500).json({ 
-            message: "Optimizasyon servisi hatası", 
-            error: error.message 
-        });
-    }
-});
 
 async function sendmail(email, text, username) {
   const htmlContent = `
@@ -377,6 +341,42 @@ catch(error)
 });
 
 
+app.post('/optimize', limiter, auth, perm(1, 2), async (req, res) => {
+    const { product, orders, trailer, truckInfo } = req.body;
+    if (!product || !orders || !trailer || !truckInfo) {
+        return res.status(400).json({ message: "Eksik veri gönderildi." });
+    }
+
+    const payload = {
+        products: Array.isArray(product) ? product : [product],
+        routes: Array.isArray(orders) ? orders : [orders], 
+        trailers: Array.isArray(trailer) ? trailer : [trailer],
+        trucks: Array.isArray(truckInfo) ? truckInfo : [truckInfo] 
+    };
+
+    try {
+        const optimizerUrl = process.env.OPTIMIZER_URL || 'http://optimizer:8000';
+        
+        console.log("Sending data to optimizer...");
+        
+        const response = await axios.post(`${optimizerUrl}/solve`, payload);
+
+        return res.status(200).json({
+            message: "Optimizasyon tamamlandı",
+            result: response.data
+        });
+
+    } catch (error) {
+        console.error("Optimization Service Error:", error.message);
+        if(error.response) {
+            console.error("Python Error Data:", error.response.data);
+        }
+        return res.status(500).json({ 
+            message: "Optimizasyon servisi hatası", 
+            error: error.message 
+        });
+    }
+});
 
 app.get('/getCountries',limiter, auth, perm(1,2),
 async(req, res) => {
