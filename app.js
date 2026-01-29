@@ -11,6 +11,44 @@ const auth = require('./components/auth');
 const perm = require('./components/perm');
 const nodemailer = require("nodemailer");
 const rateLimit = require('express-rate-limit');
+const axios = require('axios');
+
+app.post('/optimize', limiter, auth, perm(1, 2), async (req, res) => {
+    const { product, orders, trailer, truckInfo } = req.body;
+    if (!product || !orders || !trailer || !truckInfo) {
+        return res.status(400).json({ message: "Eksik veri gönderildi." });
+    }
+
+    const payload = {
+        products: Array.isArray(product) ? product : [product],
+        routes: Array.isArray(orders) ? orders : [orders], 
+        trailers: Array.isArray(trailer) ? trailer : [trailer],
+        trucks: Array.isArray(truckInfo) ? truckInfo : [truckInfo] 
+    };
+
+    try {
+        const optimizerUrl = process.env.OPTIMIZER_URL || 'http://optimizer:8000';
+        
+        console.log("Sending data to optimizer...");
+        
+        const response = await axios.post(`${optimizerUrl}/solve`, payload);
+
+        return res.status(200).json({
+            message: "Optimizasyon tamamlandı",
+            result: response.data
+        });
+
+    } catch (error) {
+        console.error("Optimization Service Error:", error.message);
+        if(error.response) {
+            console.error("Python Error Data:", error.response.data);
+        }
+        return res.status(500).json({ 
+            message: "Optimizasyon servisi hatası", 
+            error: error.message 
+        });
+    }
+});
 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
@@ -1594,7 +1632,6 @@ app.get('/listOrders', limiter, auth, perm(1, 2), async (req, res) => {
 
     const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
 
-    // Count Query
     const countQuery = `
       SELECT COUNT(DISTINCT o.orderID) as total
       FROM orders o
@@ -1606,7 +1643,6 @@ app.get('/listOrders', limiter, auth, perm(1, 2), async (req, res) => {
 
     const [[{ total }]] = await con.promise().query(countQuery, params);
 
-    // FIXED Data Query: Added MAX() around non-aggregated columns
     const dataQuery = `
       SELECT 
         o.orderID,
